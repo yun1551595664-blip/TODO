@@ -1,0 +1,38 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root123456
+      MYSQL_DATABASE: issue_ops
+      TZ: Asia/Shanghai
+    ports: ["${MYSQL_PORT:-3306}:3306"]
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck: {test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot123456"], interval: 10s, timeout: 5s, retries: 10}
+  backend:
+    build: ./backend
+    dns:
+      - ${DOCKER_DNS_PRIMARY:-223.5.5.5}
+      - ${DOCKER_DNS_SECONDARY:-114.114.114.114}
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/issue_ops?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      DB_USERNAME: root
+      DB_PASSWORD: root123456
+      AI_PROVIDER: ${AI_PROVIDER:-deepseek}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.deepseek.com}
+      AI_MODEL: ${AI_MODEL:-deepseek-v4-pro}
+      AI_TIMEOUT_MS: ${AI_TIMEOUT_MS:-60000}
+      AI_TEMPERATURE: ${AI_TEMPERATURE:-0.2}
+      AI_MAX_TOKENS: ${AI_MAX_TOKENS:-2000}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-pro}
+    ports: ["${BACKEND_PORT:-8080}:8080"]
+    depends_on: {mysql: {condition: service_healthy}}
+  frontend:
+    build: ./frontend
+    ports: ["${FRONTEND_PORT:-80}:80"]
+    depends_on: [backend]
+volumes: {mysql_data: {}}

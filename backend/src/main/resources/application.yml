@@ -1,0 +1,34 @@
+server:
+  port: 8080
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/issue_ops?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:root123456}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+  jackson:
+    time-zone: Asia/Shanghai
+    default-property-inclusion: non_null
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 1
+    locations: classpath:db/migration
+deepseek:
+  api-key: ${DEEPSEEK_API_KEY:}
+  base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+  model: ${DEEPSEEK_MODEL:deepseek-v4-pro}
+ai:
+  provider: ${AI_PROVIDER:deepseek}
+  api-key: ${AI_API_KEY:${DEEPSEEK_API_KEY:}}
+  base-url: ${AI_BASE_URL:${DEEPSEEK_BASE_URL:}}
+  model: ${AI_MODEL:${DEEPSEEK_MODEL:deepseek-v4-pro}}
+  timeout-ms: ${AI_TIMEOUT_MS:60000}
+  temperature: ${AI_TEMPERATURE:0.2}
+  max-tokens: ${AI_MAX_TOKENS:2000}
