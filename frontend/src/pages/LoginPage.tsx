@@ -80,11 +80,15 @@ export default function LoginPage() {
         <section className="login-hero" aria-label="产品能力介绍">
           <div className="login-logo">
             <StarFilled />
-            <span>IssueOps</span>
+            <span className="notranslate" lang="en" translate="no">
+              IssueOps
+            </span>
           </div>
           <div className="login-copy">
             <h1>
-              <span>IssueOps</span>
+              <span className="notranslate" lang="en" translate="no">
+                IssueOps
+              </span>
               产品与业务问题治理平台
             </h1>
             <h2>让异常问题从提交处理走向持续闭环</h2>
@@ -125,7 +129,12 @@ export default function LoginPage() {
             <StarFilled />
           </div>
           <div className="login-card-heading">
-            <h2>登录 IssueOps</h2>
+            <h2>
+              登录{" "}
+              <span className="notranslate" lang="en" translate="no">
+                IssueOps
+              </span>
+            </h2>
             <p>进入问题治理工作台</p>
           </div>
           <Form layout="vertical" onFinish={submit}>
