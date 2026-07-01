@@ -1,5 +1,14 @@
-import { LockOutlined, UserOutlined } from "@ant-design/icons";
-import { Button, Form, Input, message } from "antd";
+import {
+  BarChartOutlined,
+  BulbOutlined,
+  FieldTimeOutlined,
+  LockOutlined,
+  RobotOutlined,
+  StarFilled,
+  UnorderedListOutlined,
+  UserOutlined,
+} from "@ant-design/icons";
+import { Button, Checkbox, Form, Input, message } from "antd";
 import { useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth";
@@ -8,6 +17,39 @@ type LoginValues = {
   username: string;
   password: string;
 };
+
+const capabilities = [
+  {
+    title: "统一问题台账",
+    desc: "集中记录来源、场景、类型与影响",
+    icon: <UnorderedListOutlined />,
+    className: "feature-ledger",
+  },
+  {
+    title: "进度闭环跟踪",
+    desc: "状态流转、责任归属、完成计划",
+    icon: <FieldTimeOutlined />,
+    className: "feature-flow",
+  },
+  {
+    title: "AI 智能洞察",
+    desc: "识别超期、复发与高优先级问题",
+    icon: <RobotOutlined />,
+    className: "feature-ai",
+  },
+  {
+    title: "数据报表分析",
+    desc: "沉淀分布、时长与优化方向",
+    icon: <BarChartOutlined />,
+    className: "feature-report",
+  },
+  {
+    title: "复盘知识沉淀",
+    desc: "形成根因、方案与改进记录",
+    icon: <BulbOutlined />,
+    className: "feature-review",
+  },
+];
 
 export default function LoginPage() {
   const { user, login } = useAuth();
@@ -34,50 +76,98 @@ export default function LoginPage() {
 
   return (
     <main className="login-page">
-      <section className="login-card">
-        <div className="login-brand">
-          <span>IssueOps</span>
-          <b>产品与业务问题治理平台</b>
-          <p>登录后进入内部看板，按角色控制问题流转、字段配置和 AI 操作。</p>
-        </div>
-        <Form
-          layout="vertical"
-          initialValues={{ username: "admin", password: "admin123" }}
-          onFinish={submit}
-        >
-          <Form.Item
-            name="username"
-            label="账号"
-            rules={[{ required: true, message: "请输入账号" }]}
-          >
-            <Input prefix={<UserOutlined />} placeholder="admin" size="large" />
-          </Form.Item>
-          <Form.Item
-            name="password"
-            label="密码"
-            rules={[{ required: true, message: "请输入密码" }]}
-          >
-            <Input.Password
-              prefix={<LockOutlined />}
-              placeholder="admin123"
+      <div className="login-shell">
+        <section className="login-hero" aria-label="产品能力介绍">
+          <div className="login-logo">
+            <StarFilled />
+            <span>IssueOps</span>
+          </div>
+          <div className="login-copy">
+            <h1>
+              <span>IssueOps</span>
+              产品与业务问题治理平台
+            </h1>
+            <h2>让异常问题从提交处理走向持续闭环</h2>
+            <p>
+              统一管理问题来源、影响范围、处理进度、责任归属与复盘沉淀。
+            </p>
+          </div>
+          <div className="login-visual" aria-hidden="true">
+            <div className="visual-core">
+              <StarFilled />
+            </div>
+            <div className="visual-ring ring-one" />
+            <div className="visual-ring ring-two" />
+            <div className="visual-panel panel-back">
+              <i />
+              <i />
+              <i />
+            </div>
+            <div className="visual-panel panel-front">
+              <span />
+              <span />
+              <span />
+            </div>
+            {capabilities.map((item) => (
+              <div className={`feature-card ${item.className}`} key={item.title}>
+                <em>{item.icon}</em>
+                <div>
+                  <b>{item.title}</b>
+                  <small>{item.desc}</small>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="login-card" aria-label="登录表单">
+          <div className="login-card-mark">
+            <StarFilled />
+          </div>
+          <div className="login-card-heading">
+            <h2>登录 IssueOps</h2>
+            <p>进入问题治理工作台</p>
+          </div>
+          <Form layout="vertical" onFinish={submit}>
+            <Form.Item
+              name="username"
+              label="账号"
+              rules={[{ required: true, message: "请输入账号" }]}
+            >
+              <Input
+                prefix={<UserOutlined />}
+                placeholder="请输入账号"
+                size="large"
+              />
+            </Form.Item>
+            <Form.Item
+              name="password"
+              label="密码"
+              rules={[{ required: true, message: "请输入密码" }]}
+            >
+              <Input.Password
+                prefix={<LockOutlined />}
+                placeholder="请输入密码"
+                size="large"
+              />
+            </Form.Item>
+            <div className="login-options">
+              <Checkbox defaultChecked>记住我</Checkbox>
+              <span>如需重置密码，请联系管理员</span>
+            </div>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={loading}
+              block
               size="large"
-            />
-          </Form.Item>
-          <Button
-            type="primary"
-            htmlType="submit"
-            loading={loading}
-            block
-            size="large"
-          >
-            登录系统
-          </Button>
-        </Form>
-        <div className="login-demo">
-          <span>演示账号</span>
-          <p>管理员 admin/admin123 · 产品 product/product123 · 技术 tech/tech123</p>
-        </div>
-      </section>
+            >
+              进入工作台
+            </Button>
+          </Form>
+          <div className="login-footnote">内部系统 · 按角色访问 · 操作留痕</div>
+        </section>
+      </div>
     </main>
   );
 }
