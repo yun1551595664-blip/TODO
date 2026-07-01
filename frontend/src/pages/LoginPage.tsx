@@ -135,7 +135,6 @@ export default function LoginPage() {
                 IssueOps
               </span>
             </h2>
-            <p>进入问题治理工作台</p>
           </div>
           <Form layout="vertical" onFinish={submit}>
             <Form.Item
@@ -174,7 +173,10 @@ export default function LoginPage() {
               进入工作台
             </Button>
           </Form>
-          <div className="login-footnote">内部系统 · 按角色访问 · 操作留痕</div>
+          <div className="login-footnote">
+            <LockOutlined />
+            <span>数据安全传输中，全程 SSL 加密保护</span>
+          </div>
         </section>
       </div>
     </main>
