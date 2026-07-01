@@ -14,6 +14,8 @@
 - 处理记录：详情页直接新增。
 - 数据报表：问题概况、高频问题分布、类型/部门分布、处理时长、风险问题和动态优化建议。
 - AI 能力：独立 AI 洞察页、SSE 流式追问、AI 生成待确认操作草稿、问题详情归因/建议/重复判断；未配置模型时使用本地规则兜底。
+- 登录与角色：内置内部账号登录，按角色控制新增/编辑/删除、状态流转、字段配置和 AI 草稿执行。
+- CI：GitHub Actions 自动执行后端测试、前端构建和提交内容检查。
 - 统一响应：`{ code, message, data }`；统一异常处理。
 
 ## 目录
@@ -65,6 +67,28 @@ npm run dev
 
 开发地址：`http://localhost:5173`。本地浏览器访问 `localhost` 或 `127.0.0.1` 时，前端默认直连 `http://127.0.0.1:8080/api`，可通过 `VITE_API_BASE_URL` 覆盖。
 
+### 默认登录账号
+
+第一版使用后端环境变量维护内部账号，默认账号仅用于本地开发和演示：
+
+| 角色 | 账号 | 密码 | 权限 |
+| --- | --- | --- | --- |
+| 管理员 | `admin` | `admin123` | 全部权限，含字段配置和删除 |
+| 产品 | `product` | `product123` | 新增/编辑问题、状态流转、AI 草稿执行 |
+| 技术 | `tech` | `tech123` | 编辑问题、状态流转、AI 草稿执行 |
+| 客服 | `cs` | `cs123` | 新增问题、追加处理记录 |
+| 观察员 | `viewer` | `viewer123` | 只读 |
+
+生产部署时请在 `.env` 中覆盖：
+
+```text
+AUTH_SECRET=change-this-to-a-long-random-secret
+AUTH_TOKEN_TTL_SECONDS=28800
+AUTH_USERS=admin|admin123|ADMIN|照远;product|product123|PRODUCT|产品负责人
+```
+
+`AUTH_USERS` 格式为 `账号|密码|角色|显示名`，多个账号用英文分号分隔。当前角色支持 `ADMIN`、`PRODUCT`、`TECH`、`CS`、`VIEWER`。
+
 ## Docker Compose 启动
 
 ```bash
@@ -115,6 +139,14 @@ Docker Compose 会自动读取项目根目录的 `.env` 文件或当前 shell �
 DOCKER_DNS_PRIMARY=223.5.5.5
 DOCKER_DNS_SECONDARY=114.114.114.114
 ```
+
+## GitHub Actions CI
+
+仓库已包含 `.github/workflows/ci.yml`，在 push 或 PR 到 `main` 时自动执行：
+
+- 后端：`mvn test`
+- 前端：`npm ci` 与 `npm run build`
+- 提交内容检查：阻止 `.env`、`node_modules`、`dist`、`target`、`output`、日志和 tsbuildinfo 进入版本库
 
 ## AI 洞察说明
 

@@ -1,5 +1,7 @@
 import axios from "axios";
 import type {
+  AuthSession,
+  AuthUser,
   AiChatAnswer,
   AiActionExecution,
   AiInsightMessage,
@@ -22,6 +24,8 @@ import type {
   TrendPoint,
 } from "./types";
 
+const AUTH_STORAGE_KEY = "issueOpsAuth";
+
 function resolveApiBaseUrl() {
   if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL;
   if (typeof window !== "undefined") {
@@ -40,16 +44,38 @@ const http = axios.create({
   timeout: 70000,
 });
 
+function getStoredAuthToken() {
+  if (typeof window === "undefined") return "";
+  try {
+    const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return "";
+    return (JSON.parse(raw) as AuthSession).token || "";
+  } catch {
+    return "";
+  }
+}
+
 function apiUrl(path: string) {
   return `${apiBaseUrl}${path}`;
 }
 
+http.interceptors.request.use((config) => {
+  const token = getStoredAuthToken();
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
 http.interceptors.response.use(
   (response) => response.data,
-  (error) =>
-    Promise.reject(
+  (error) => {
+    if (error.response?.status === 401 && typeof window !== "undefined") {
+      window.localStorage.removeItem(AUTH_STORAGE_KEY);
+      window.dispatchEvent(new CustomEvent("issueops:auth-expired"));
+    }
+    return Promise.reject(
       new Error(error.response?.data?.message || error.message || "请求失败"),
-    ),
+    );
+  },
 );
 
 async function streamAiInsightChat(
@@ -64,6 +90,9 @@ async function streamAiInsightChat(
       headers: {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
+        ...(getStoredAuthToken()
+          ? { Authorization: `Bearer ${getStoredAuthToken()}` }
+          : {}),
       },
       body: JSON.stringify(data),
     },
@@ -114,6 +143,16 @@ async function streamAiInsightChat(
 }
 
 export const issueApi = {
+  login: (data: { username: string; password: string }) =>
+    http
+      .post<unknown, ApiResponse<AuthSession>>("/auth/login", data)
+      .then((response) => response.data),
+
+  me: () =>
+    http
+      .get<unknown, ApiResponse<AuthUser>>("/auth/me")
+      .then((response) => response.data),
+
   list: (params: Record<string, unknown>) =>
     http
       .get<unknown, ApiResponse<PageData<Issue>>>("/issues", { params })

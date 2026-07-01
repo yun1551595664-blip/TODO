@@ -20,6 +20,7 @@ import dayjs from "dayjs";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { issueApi } from "../api";
+import { useAuth } from "../auth";
 import RecurrenceInsightCard from "../components/RecurrenceInsightCard";
 import StatusTag from "../components/StatusTag";
 import type { Issue, IssueAiAnalysis } from "../types";
@@ -27,6 +28,7 @@ const statuses = ["待处理", "处理中", "待验证", "已完成"];
 export default function IssueDetail() {
   const { id } = useParams();
   const nav = useNavigate();
+  const { user, hasPermission } = useAuth();
   const [issue, setIssue] = useState<Issue>();
   const [statusOpen, setStatusOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
@@ -34,7 +36,7 @@ export default function IssueDetail() {
   const [reopenedReason, setReopenedReason] = useState("");
   const [nextStatus, setNextStatus] = useState("处理中");
   const [content, setContent] = useState("");
-  const [operator, setOperator] = useState("林悦");
+  const [operator, setOperator] = useState(user?.displayName || "");
   const [aiResult, setAiResult] = useState<IssueAiAnalysis>();
   const [aiLoadingType, setAiLoadingType] = useState("");
   const load = () =>
@@ -45,6 +47,9 @@ export default function IssueDetail() {
   useEffect(() => {
     void load();
   }, [id]);
+  useEffect(() => {
+    if (!operator && user?.displayName) setOperator(user.displayName);
+  }, [user?.displayName, operator]);
   if (!issue) return <div className="page">加载中…</div>;
   const change = () =>
     issueApi
@@ -101,28 +106,36 @@ export default function IssueDetail() {
           返回台账
         </Button>
         <Space>
-          <Button
-            icon={<EditOutlined />}
-            onClick={() => nav(`/issues/${issue.id}/edit`)}
-          >
-            编辑
-          </Button>
-          <Button icon={<PlusOutlined />} onClick={() => setLogOpen(true)}>
-            新增处理记录
-          </Button>
-          <Button
-            danger={!issue.reopened}
-            icon={<ExclamationCircleOutlined />}
-            onClick={() => {
-              setReopenedReason(issue.reopenedReason || "");
-              setReopenedOpen(true);
-            }}
-          >
-            {issue.reopened ? "取消复发" : "标记复发"}
-          </Button>
-          <Button type="primary" onClick={() => setStatusOpen(true)}>
-            更新状态
-          </Button>
+          {hasPermission("issue:edit") && (
+            <Button
+              icon={<EditOutlined />}
+              onClick={() => nav(`/issues/${issue.id}/edit`)}
+            >
+              编辑
+            </Button>
+          )}
+          {hasPermission("issue:log") && (
+            <Button icon={<PlusOutlined />} onClick={() => setLogOpen(true)}>
+              新增处理记录
+            </Button>
+          )}
+          {hasPermission("issue:status") && (
+            <Button
+              danger={!issue.reopened}
+              icon={<ExclamationCircleOutlined />}
+              onClick={() => {
+                setReopenedReason(issue.reopenedReason || "");
+                setReopenedOpen(true);
+              }}
+            >
+              {issue.reopened ? "取消复发" : "标记复发"}
+            </Button>
+          )}
+          {hasPermission("issue:status") && (
+            <Button type="primary" onClick={() => setStatusOpen(true)}>
+              更新状态
+            </Button>
+          )}
         </Space>
       </div>
       <div className="detail-layout">

@@ -65,6 +65,19 @@ export type DashboardData = {
   dataUpdatedAt?: string;
 };
 
+export type AuthUser = {
+  username: string;
+  displayName: string;
+  role: "ADMIN" | "PRODUCT" | "TECH" | "CS" | "VIEWER" | string;
+  permissions: string[];
+};
+
+export type AuthSession = {
+  token: string;
+  user: AuthUser;
+  expiresAt: number;
+};
+
 export type AiRiskKey = "overdue" | "reopened" | "highPriority";
 
 export type AiRiskRadarItem = {

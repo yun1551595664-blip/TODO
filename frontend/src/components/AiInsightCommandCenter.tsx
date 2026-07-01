@@ -13,6 +13,7 @@ import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { issueApi } from "../api";
+import { useAuth } from "../auth";
 import type {
   AiChatAnswer,
   AiInsightMessage,
@@ -419,11 +420,13 @@ function actionImpactText(action: AiPendingAction) {
 function PendingActionCard({
   action,
   loading,
+  disabled,
   onExecute,
   onDismiss,
 }: {
   action: AiPendingAction;
   loading: boolean;
+  disabled: boolean;
   onExecute: (action: AiPendingAction) => void;
   onDismiss: () => void;
 }) {
@@ -465,7 +468,7 @@ function PendingActionCard({
         <Button
           type="primary"
           loading={loading}
-          disabled={!action.actionId}
+          disabled={!action.actionId || disabled}
           onClick={() => onExecute(action)}
         >
           确认写入系统
@@ -538,6 +541,7 @@ function AssistantDone({
   answer,
   overview,
   actionLoading,
+  canExecuteAction,
   onExecuteAction,
   onDismissAction,
   onQuickAsk,
@@ -547,6 +551,7 @@ function AssistantDone({
   answer: AiChatAnswer;
   overview: AiInsightOverview;
   actionLoading: boolean;
+  canExecuteAction: boolean;
   onExecuteAction: (action: AiPendingAction) => void;
   onDismissAction: () => void;
   onQuickAsk: (question: string) => void;
@@ -577,6 +582,7 @@ function AssistantDone({
           <PendingActionCard
             action={answer.pendingAction}
             loading={actionLoading}
+            disabled={!canExecuteAction}
             onExecute={onExecuteAction}
             onDismiss={onDismissAction}
           />
@@ -643,6 +649,7 @@ function AssistantError({
 }
 
 export default function AiInsightCommandCenter() {
+  const { hasPermission } = useAuth();
   const [overview, setOverview] = useState<AiInsightOverview>();
   const [selectedRisk, setSelectedRisk] = useState<AiRiskKey | undefined>(
     "highPriority",
@@ -902,6 +909,10 @@ export default function AiInsightCommandCenter() {
       message.error("缺少待确认操作 ID，请重新生成操作草案");
       return;
     }
+    if (!hasPermission("ai:execute")) {
+      message.error("当前角色无权执行 AI 操作草稿");
+      return;
+    }
     setActionLoading(true);
     try {
       const result = await issueApi.aiActionExecute(action.actionId);
@@ -1139,6 +1150,7 @@ export default function AiInsightCommandCenter() {
                 answer={latestAnswer}
                 overview={overview}
                 actionLoading={actionLoading}
+                canExecuteAction={hasPermission("ai:execute")}
                 onExecuteAction={executeAction}
                 onDismissAction={dismissPendingAction}
                 onQuickAsk={submitQuestion}

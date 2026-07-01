@@ -4,16 +4,21 @@ import dayjs from "dayjs";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { issueApi } from "../api";
+import { useAuth } from "../auth";
 import { useDictionaryOptions } from "../hooks/useDictionaryOptions";
 const { TextArea } = Input;
 const options = (a: string[]) => a.map((value) => ({ value, label: value }));
 export default function IssueForm() {
   const { id } = useParams();
   const nav = useNavigate();
+  const { user, hasPermission } = useAuth();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const { options: dictionaryOptions, loading: dictionaryLoading } =
     useDictionaryOptions(true);
+  const canSubmit = id
+    ? hasPermission("issue:edit")
+    : hasPermission("issue:create");
   useEffect(() => {
     if (id)
       issueApi.get(id).then((i) =>
@@ -25,6 +30,19 @@ export default function IssueForm() {
         }),
       );
   }, [id]);
+  useEffect(() => {
+    if (!id && user?.displayName) {
+      form.setFieldValue("createdBy", user.displayName);
+    }
+  }, [form, id, user?.displayName]);
+  if (!canSubmit) {
+    return (
+      <div className="page forbidden-page">
+        <h1>无权操作</h1>
+        <p>当前账号没有{id ? "编辑问题" : "新增问题"}权限。</p>
+      </div>
+    );
+  }
   const submit = async (v: any) => {
     setLoading(true);
     try {
@@ -59,7 +77,11 @@ export default function IssueForm() {
       <Form
         form={form}
         layout="vertical"
-        initialValues={{ priority: "P2", status: "待处理", createdBy: "林悦" }}
+        initialValues={{
+          priority: "P2",
+          status: "待处理",
+          createdBy: user?.displayName || "当前用户",
+        }}
         onFinish={submit}
       >
         <div className="form-surface">

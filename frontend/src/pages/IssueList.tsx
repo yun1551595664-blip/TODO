@@ -20,12 +20,14 @@ import dayjs from "dayjs";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { issueApi } from "../api";
+import { useAuth } from "../auth";
 import StatusTag from "../components/StatusTag";
 import { useDictionaryOptions } from "../hooks/useDictionaryOptions";
 import type { Issue, PageData } from "../types";
 const opts = (x: string[]) => x.map((v) => ({ label: v, value: v }));
 export default function IssueList() {
   const nav = useNavigate();
+  const { hasPermission } = useAuth();
   const [data, setData] = useState<PageData<Issue>>({
     content: [],
     totalElements: 0,
@@ -144,12 +146,14 @@ export default function IssueList() {
             icon={<EyeOutlined />}
             onClick={() => nav(`/issues/${r.id}`)}
           />
-          <Popconfirm
-            title="确认删除该问题？"
-            onConfirm={() => issueApi.remove(r.id).then(load)}
-          >
-            <Button type="text" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
+          {hasPermission("issue:delete") && (
+            <Popconfirm
+              title="确认删除该问题？"
+              onConfirm={() => issueApi.remove(r.id).then(load)}
+            >
+              <Button type="text" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
@@ -161,13 +165,15 @@ export default function IssueList() {
           <h1>问题台账</h1>
           <p>统一跟踪异常来源、影响、责任与闭环结果</p>
         </div>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => nav("/issues/new")}
-        >
-          新增问题
-        </Button>
+        {hasPermission("issue:create") && (
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => nav("/issues/new")}
+          >
+            新增问题
+          </Button>
+        )}
       </div>
       <div className="filter-bar">
         <Input

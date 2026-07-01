@@ -2,6 +2,7 @@ import {
   AppstoreOutlined,
   BulbOutlined,
   FileTextOutlined,
+  LogoutOutlined,
   PlusOutlined,
   QuestionCircleOutlined,
   RobotOutlined,
@@ -11,6 +12,7 @@ import {
 } from "@ant-design/icons";
 import { Button, Tooltip } from "antd";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "../auth";
 const items = [
   ["/", "概览", AppstoreOutlined],
   ["/issues", "问题", QuestionCircleOutlined],
@@ -21,6 +23,7 @@ const items = [
 export default function AppLayout() {
   const nav = useNavigate();
   const loc = useLocation();
+  const { user, logout, hasPermission } = useAuth();
   return (
     <div className="app-shell">
       <aside className="nav-rail">
@@ -44,19 +47,32 @@ export default function AppLayout() {
           ))}
         </nav>
         <div className="rail-bottom">
-          <Tooltip title="新建问题" placement="right">
-            <Button
-              type="primary"
-              shape="circle"
-              icon={<PlusOutlined />}
-              onClick={() => nav("/issues/new")}
-            />
+          {hasPermission("issue:create") && (
+            <Tooltip title="新建问题" placement="right">
+              <Button
+                type="primary"
+                shape="circle"
+                icon={<PlusOutlined />}
+                onClick={() => nav("/issues/new")}
+              />
+            </Tooltip>
+          )}
+          <Tooltip
+            title={`${user?.displayName || user?.username} · ${user?.role}`}
+            placement="right"
+          >
+            <div className="rail-user">{user?.displayName?.slice(0, 1) || "用"}</div>
           </Tooltip>
-          <Tooltip title="字段配置" placement="right">
-            <SettingOutlined
-              className="rail-icon"
-              onClick={() => nav("/settings/fields")}
-            />
+          {hasPermission("field:manage") && (
+            <Tooltip title="字段配置" placement="right">
+              <SettingOutlined
+                className="rail-icon"
+                onClick={() => nav("/settings/fields")}
+              />
+            </Tooltip>
+          )}
+          <Tooltip title="退出登录" placement="right">
+            <LogoutOutlined className="rail-icon" onClick={logout} />
           </Tooltip>
         </div>
       </aside>

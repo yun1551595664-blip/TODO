@@ -21,6 +21,9 @@ services:
       DB_PASSWORD: root123456
       TZ: Asia/Shanghai
       JAVA_TOOL_OPTIONS: -Duser.timezone=Asia/Shanghai
+      AUTH_SECRET: ${AUTH_SECRET:-dev-local-issue-ops-secret-change-me}
+      AUTH_TOKEN_TTL_SECONDS: ${AUTH_TOKEN_TTL_SECONDS:-28800}
+      AUTH_USERS: ${AUTH_USERS:-admin|admin123|ADMIN|照远;product|product123|PRODUCT|产品负责人;tech|tech123|TECH|技术负责人;cs|cs123|CS|客服同学;viewer|viewer123|VIEWER|观察员}
       AI_PROVIDER: ${AI_PROVIDER:-deepseek}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_BASE_URL: ${AI_BASE_URL:-https://api.deepseek.com}
