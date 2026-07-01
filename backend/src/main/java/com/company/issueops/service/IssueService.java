@@ -22,6 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class IssueService {
 
+  private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
+
   private static final List<String> WORKFLOW_STATUSES = List.of(
     "待处理",
     "处理中",
@@ -34,6 +36,22 @@ public class IssueService {
   private final AiClient aiClient;
   private final ObjectMapper objectMapper;
   private final ApplicationEventPublisher events;
+
+  private LocalDate today() {
+    return LocalDate.now(BUSINESS_ZONE);
+  }
+
+  private LocalDateTime now() {
+    return LocalDateTime.now(BUSINESS_ZONE);
+  }
+
+  private String nowWithOffset() {
+    return OffsetDateTime.now(BUSINESS_ZONE).toString();
+  }
+
+  private String withBusinessOffset(LocalDateTime value) {
+    return value.atZone(BUSINESS_ZONE).toOffsetDateTime().toString();
+  }
 
   public Page<Issue> list(Map<String, String> q, Pageable page) {
     Specification<Issue> spec = (root, cq, cb) -> {
@@ -80,7 +98,7 @@ public class IssueService {
       );
       if ("true".equals(q.get("overdue"))) p.add(
         cb.and(
-          cb.lessThan(root.get("expectedFinishTime"), LocalDateTime.now()),
+          cb.lessThan(root.get("expectedFinishTime"), now()),
           root.get("status").in("待处理", "处理中", "待验证")
         )
       );
@@ -89,7 +107,7 @@ public class IssueService {
           cb.isNull(root.get("expectedFinishTime")),
           cb.greaterThanOrEqualTo(
             root.get("expectedFinishTime"),
-            LocalDateTime.now()
+            now()
           ),
           cb.equal(root.get("status"), "已完成")
         )
@@ -146,7 +164,7 @@ public class IssueService {
     i.setStatus(status);
     if (
       "已完成".equals(status) && !"已完成".equals(old) && i.getActualFinishTime() == null
-    ) i.setActualFinishTime(LocalDateTime.now());
+    ) i.setActualFinishTime(now());
     if (!"已完成".equals(status) && "已完成".equals(old)) i.setActualFinishTime(
       null
     );
@@ -215,19 +233,19 @@ public class IssueService {
       .stream()
       .filter(i -> !i.getDeleted())
       .toList();
-    LocalDateTime month = LocalDate.now().withDayOfMonth(1).atStartOfDay();
+    LocalDateTime month = today().withDayOfMonth(1).atStartOfDay();
     Map<String, Long> status = all
       .stream()
       .collect(Collectors.groupingBy(Issue::getStatus, Collectors.counting()));
     long completed = status.getOrDefault("已完成", 0L);
     long reopened = all.stream().filter(i -> Boolean.TRUE.equals(i.getReopened())).count();
     long overdue = all.stream().filter(this::isOverdue).count();
-    LocalDateTime updatedAt = all
+    LocalDateTime dataUpdatedAt = all
       .stream()
       .map(Issue::getUpdatedAt)
       .filter(Objects::nonNull)
       .max(LocalDateTime::compareTo)
-      .orElse(LocalDateTime.now());
+      .orElse(now());
     Map<String, Object> r = new LinkedHashMap<>();
     r.put("total", (long) all.size());
     r.put("pending", status.getOrDefault("待处理", 0L));
@@ -236,7 +254,8 @@ public class IssueService {
     r.put("completed", completed);
     r.put("reopened", reopened);
     r.put("overdue", overdue);
-    r.put("updatedAt", updatedAt.toString());
+    r.put("updatedAt", nowWithOffset());
+    r.put("dataUpdatedAt", withBusinessOffset(dataUpdatedAt));
     r.put(
       "monthlyNew",
       all
@@ -275,7 +294,7 @@ public class IssueService {
       .stream()
       .filter(i -> !i.getDeleted())
       .toList();
-    LocalDateTime recentStart = LocalDate.now().minusDays(30).atStartOfDay();
+    LocalDateTime recentStart = today().minusDays(30).atStartOfDay();
     List<Issue> recent = all
       .stream()
       .filter(
@@ -371,7 +390,7 @@ public class IssueService {
       "promptSuggestions",
       List.of("本周最需要关注什么？", "哪些问题可能复发？", "如何降低超期风险？")
     );
-    result.put("updatedAt", LocalDateTime.now().toString());
+    result.put("updatedAt", nowWithOffset());
     boolean aiApplied = false;
     if (aiClient.available()) {
       Optional<Map<String, Object>> generated = aiClient.chatJson(
@@ -440,7 +459,7 @@ public class IssueService {
       "model",
       aiAnswer.isPresent() ? aiClient.model() : "local-rules",
       "generatedAt",
-      LocalDateTime.now().toString()
+      nowWithOffset()
     );
   }
 
@@ -453,7 +472,7 @@ public class IssueService {
       default -> 8;
     };
 
-    LocalDate trendAnchor = LocalDate.now();
+    LocalDate trendAnchor = today();
     List<Map<String, Object>> trend = new ArrayList<>();
     for (int offset = bucketCount - 1; offset >= 0; offset--) {
       LocalDate bucketStart = daily
@@ -674,7 +693,7 @@ public class IssueService {
   private boolean isOverdue(Issue issue) {
     return (
       issue.getExpectedFinishTime() != null &&
-      issue.getExpectedFinishTime().isBefore(LocalDateTime.now()) &&
+      issue.getExpectedFinishTime().isBefore(now()) &&
       issue.getActualFinishTime() == null
     );
   }
@@ -986,7 +1005,7 @@ public class IssueService {
 
   private synchronized String nextIssueNo() {
     String prefix =
-      "PBI-" + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) + "-";
+      "PBI-" + today().format(DateTimeFormatter.BASIC_ISO_DATE) + "-";
     int next = issues
       .findTopByIssueNoStartingWithOrderByIssueNoDesc(prefix)
       .map(Issue::getIssueNo)

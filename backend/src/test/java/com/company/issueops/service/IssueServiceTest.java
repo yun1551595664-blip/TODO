@@ -69,10 +69,12 @@ class IssueServiceTest {
   void dashboardContainsFocusedMetricsIncludingRiskCounters() {
     Issue pending = issue(1L, "待处理");
     pending.setCreatedAt(LocalDateTime.now());
+    pending.setUpdatedAt(LocalDateTime.now().minusDays(2));
     pending.setExpectedFinishTime(LocalDateTime.now().minusDays(1));
     pending.setReopened(true);
     Issue completed = issue(2L, "已完成");
     completed.setCreatedAt(LocalDateTime.now());
+    completed.setUpdatedAt(LocalDateTime.now().minusDays(1));
     completed.setActualFinishTime(LocalDateTime.now());
     when(issues.findAll()).thenReturn(List.of(pending, completed));
 
@@ -86,6 +88,8 @@ class IssueServiceTest {
       "completed",
       "reopened",
       "overdue",
+      "updatedAt",
+      "dataUpdatedAt",
       "monthlyNew",
       "monthlyCompleted"
     );
@@ -100,6 +104,8 @@ class IssueServiceTest {
     assertThat(result.get("completed")).isEqualTo(1L);
     assertThat(result.get("reopened")).isEqualTo(1L);
     assertThat(result.get("overdue")).isEqualTo(1L);
+    assertThat(result.get("updatedAt")).isNotEqualTo(result.get("dataUpdatedAt"));
+    assertThat((String) result.get("updatedAt")).endsWith("+08:00");
   }
 
   @Test

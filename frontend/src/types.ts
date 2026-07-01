@@ -62,6 +62,7 @@ export type DashboardData = {
   monthlyNew: number;
   monthlyCompleted: number;
   updatedAt?: string;
+  dataUpdatedAt?: string;
 };
 
 export type AiRiskKey = "overdue" | "reopened" | "highPriority";
