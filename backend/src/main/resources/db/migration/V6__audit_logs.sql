@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS audit_log (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  operator_name VARCHAR(80),
+  operator_role VARCHAR(40),
+  action_type VARCHAR(80) NOT NULL,
+  target_type VARCHAR(40) NOT NULL,
+  target_id VARCHAR(80),
+  target_no VARCHAR(80),
+  source VARCHAR(30) NOT NULL DEFAULT 'MANUAL',
+  ai_action_id VARCHAR(80),
+  before_data TEXT,
+  after_data TEXT,
+  ip VARCHAR(80),
+  user_agent VARCHAR(500),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_audit_target(target_type, target_id),
+  INDEX idx_audit_target_no(target_no),
+  INDEX idx_audit_action(action_type),
+  INDEX idx_audit_created(created_at)
+);

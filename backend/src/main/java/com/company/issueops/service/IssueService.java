@@ -139,7 +139,9 @@ public class IssueService {
   @Transactional
   public Issue update(Long id, IssueRequest r) {
     Issue i = get(id);
+    String createdBy = i.getCreatedBy();
     copy(r, i);
+    i.setCreatedBy(createdBy);
     Issue saved = issues.save(i);
     publishIssueChanged(saved);
     return saved;

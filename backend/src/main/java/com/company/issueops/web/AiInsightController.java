@@ -3,10 +3,16 @@ package com.company.issueops.web;
 import com.company.issueops.common.ApiResponse;
 import com.company.issueops.service.AiActionService;
 import com.company.issueops.service.AiInsightService;
+import com.company.issueops.service.AuditLogService;
+import com.company.issueops.service.AuthService;
+import com.company.issueops.service.AuthService.AuthUser;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -24,6 +30,7 @@ public class AiInsightController {
 
   private final AiInsightService service;
   private final AiActionService actionService;
+  private final AuditLogService auditLogService;
 
   @GetMapping("/overview")
   ApiResponse<Map<String, Object>> overview() {
@@ -73,9 +80,24 @@ public class AiInsightController {
   }
 
   @PostMapping("/actions/execute")
+  @Transactional
   ApiResponse<Map<String, Object>> executeAction(
-    @RequestBody Map<String, Object> body
+    @RequestBody Map<String, Object> body,
+    HttpServletRequest request
   ) {
-    return ApiResponse.ok(actionService.execute(body));
+    Map<String, Object> result = actionService.execute(body);
+    auditLogService.recordAiAction(
+      currentUser(request),
+      Objects.toString(body.get("actionId"), null),
+      body,
+      result,
+      request
+    );
+    return ApiResponse.ok(result);
+  }
+
+  private AuthUser currentUser(HttpServletRequest request) {
+    Object value = request.getAttribute(AuthService.REQUEST_USER_ATTRIBUTE);
+    return value instanceof AuthUser user ? user : null;
   }
 }
