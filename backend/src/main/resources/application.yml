@@ -36,3 +36,7 @@ auth:
   secret: ${AUTH_SECRET:dev-local-issue-ops-secret-change-me}
   token-ttl-seconds: ${AUTH_TOKEN_TTL_SECONDS:28800}
   users: ${AUTH_USERS:admin|admin123|ADMIN|照远;product|product123|PRODUCT|产品负责人;tech|tech123|TECH|技术负责人;cs|cs123|CS|客服同学;viewer|viewer123|VIEWER|观察员}
+  sso:
+    enabled: ${AUTH_SSO_ENABLED:false}
+    provider-name: ${AUTH_SSO_PROVIDER_NAME:企业 SSO}
+    login-url: ${AUTH_SSO_LOGIN_URL:}

@@ -24,6 +24,9 @@ services:
       AUTH_SECRET: ${AUTH_SECRET:-dev-local-issue-ops-secret-change-me}
       AUTH_TOKEN_TTL_SECONDS: ${AUTH_TOKEN_TTL_SECONDS:-28800}
       AUTH_USERS: ${AUTH_USERS:-admin|admin123|ADMIN|照远;product|product123|PRODUCT|产品负责人;tech|tech123|TECH|技术负责人;cs|cs123|CS|客服同学;viewer|viewer123|VIEWER|观察员}
+      AUTH_SSO_ENABLED: ${AUTH_SSO_ENABLED:-false}
+      AUTH_SSO_PROVIDER_NAME: ${AUTH_SSO_PROVIDER_NAME:-企业 SSO}
+      AUTH_SSO_LOGIN_URL: ${AUTH_SSO_LOGIN_URL:-}
       AI_PROVIDER: ${AI_PROVIDER:-deepseek}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_BASE_URL: ${AI_BASE_URL:-https://api.deepseek.com}

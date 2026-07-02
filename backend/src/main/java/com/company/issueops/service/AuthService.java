@@ -1,17 +1,21 @@
 package com.company.issueops.service;
 
+import com.company.issueops.domain.UserAccount;
+import com.company.issueops.repository.UserAccountRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.*;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
@@ -19,7 +23,17 @@ public class AuthService {
 
   public static final String REQUEST_USER_ATTRIBUTE = "currentUser";
 
+  private static final Set<String> ROLES = Set.of(
+    "ADMIN",
+    "PRODUCT",
+    "TECH",
+    "CS",
+    "VIEWER"
+  );
+
   private final ObjectMapper objectMapper;
+  private final UserAccountRepository accounts;
+  private final PasswordHashService passwordHashService;
 
   @Value("${auth.secret}")
   private String secret;
@@ -30,24 +44,33 @@ public class AuthService {
   @Value("${auth.users}")
   private String usersConfig;
 
-  private final Map<String, Account> accounts = new LinkedHashMap<>();
+  @Value("${auth.sso.enabled:false}")
+  private boolean ssoEnabled;
+
+  @Value("${auth.sso.provider-name:企业 SSO}")
+  private String ssoProviderName;
+
+  @Value("${auth.sso.login-url:}")
+  private String ssoLoginUrl;
 
   @PostConstruct
   void init() {
-    accounts.clear();
-    Arrays
-      .stream(usersConfig.split(";"))
-      .map(String::trim)
-      .filter(item -> !item.isBlank())
-      .map(this::parseAccount)
-      .forEach(account -> accounts.put(account.username(), account));
+    syncConfiguredAccounts();
   }
 
+  @Transactional
   public AuthSession login(String username, String password) {
-    Account account = accounts.get(normalize(username));
-    if (account == null || !Objects.equals(account.password(), password)) {
+    UserAccount account = accounts
+      .findByUsername(normalize(username))
+      .orElseThrow(() -> new IllegalArgumentException("账号或密码不正确"));
+    if (!Boolean.TRUE.equals(account.getEnabled())) {
+      throw new IllegalArgumentException("账号已停用，请联系管理员");
+    }
+    if (!passwordHashService.matches(password, account.getPasswordHash())) {
       throw new IllegalArgumentException("账号或密码不正确");
     }
+    account.setLastLoginAt(LocalDateTime.now());
+    accounts.save(account);
     long expiresAt = Instant.now().plusSeconds(tokenTtlSeconds).getEpochSecond();
     AuthUser user = toUser(account);
     return new AuthSession(issueToken(user, expiresAt), user, expiresAt);
@@ -77,9 +100,10 @@ public class AuthService {
       if (expiresAt < Instant.now().getEpochSecond()) return Optional.empty();
 
       String username = Objects.toString(claims.get("username"), "");
-      Account account = accounts.get(normalize(username));
-      if (account == null) return Optional.empty();
-      return Optional.of(toUser(account));
+      return accounts
+        .findByUsername(normalize(username))
+        .filter(account -> Boolean.TRUE.equals(account.getEnabled()))
+        .map(this::toUser);
     } catch (Exception ignored) {
       return Optional.empty();
     }
@@ -87,12 +111,15 @@ public class AuthService {
 
   public boolean canAccess(AuthUser user, String method, String path) {
     if ("OPTIONS".equalsIgnoreCase(method)) return true;
-    if ("GET".equalsIgnoreCase(method)) return true;
     if (path.startsWith("/api/auth/")) return true;
 
+    if (path.startsWith("/api/accounts")) {
+      return hasPermission(user, "account:manage");
+    }
     if (path.startsWith("/api/dictionaries")) {
       return hasPermission(user, "field:manage");
     }
+    if ("GET".equalsIgnoreCase(method)) return true;
     if ("DELETE".equalsIgnoreCase(method) && path.matches("/api/issues/\\d+")) {
       return hasPermission(user, "issue:delete");
     }
@@ -119,28 +146,159 @@ public class AuthService {
   }
 
   public boolean hasPermission(AuthUser user, String permission) {
-    return user.permissions().contains(permission);
+    return user != null && user.permissions().contains(permission);
   }
 
-  private Account parseAccount(String raw) {
+  public List<AccountView> listAccounts() {
+    return accounts.findAll().stream().map(this::toView).toList();
+  }
+
+  @Transactional
+  public AccountView createAccount(AccountMutation mutation) {
+    String username = normalize(mutation.username());
+    if (username.isBlank()) throw new IllegalArgumentException("账号不能为空");
+    if (accounts.existsByUsername(username)) {
+      throw new IllegalArgumentException("账号已存在：" + username);
+    }
+    requirePassword(mutation.password(), true);
+    UserAccount account = new UserAccount();
+    account.setUsername(username);
+    account.setPasswordHash(passwordHashService.hash(mutation.password()));
+    applyMutation(account, mutation, true);
+    return toView(accounts.save(account));
+  }
+
+  @Transactional
+  public AccountView updateAccount(Long id, AccountMutation mutation) {
+    UserAccount account = getAccount(id);
+    boolean disabling = Boolean.FALSE.equals(mutation.enabled());
+    if (disabling && isLastEnabledAdmin(account)) {
+      throw new IllegalArgumentException("不能停用最后一个启用的管理员账号");
+    }
+    if (mutation.password() != null && !mutation.password().isBlank()) {
+      requirePassword(mutation.password(), false);
+      account.setPasswordHash(passwordHashService.hash(mutation.password()));
+    }
+    applyMutation(account, mutation, false);
+    return toView(accounts.save(account));
+  }
+
+  @Transactional
+  public AccountView enabled(Long id, boolean enabled) {
+    UserAccount account = getAccount(id);
+    if (!enabled && isLastEnabledAdmin(account)) {
+      throw new IllegalArgumentException("不能停用最后一个启用的管理员账号");
+    }
+    account.setEnabled(enabled);
+    return toView(accounts.save(account));
+  }
+
+  public SsoConfig ssoConfig() {
+    return new SsoConfig(ssoEnabled, ssoProviderName);
+  }
+
+  public SsoLoginResponse ssoLogin() {
+    if (!ssoEnabled || ssoLoginUrl == null || ssoLoginUrl.isBlank()) {
+      throw new IllegalStateException("企业 SSO 尚未启用");
+    }
+    return new SsoLoginResponse(ssoProviderName, ssoLoginUrl);
+  }
+
+  private void syncConfiguredAccounts() {
+    Arrays
+      .stream(usersConfig.split(";"))
+      .map(String::trim)
+      .filter(item -> !item.isBlank())
+      .map(this::parseSeedAccount)
+      .forEach(seed -> {
+        UserAccount account = accounts
+          .findByUsername(seed.username())
+          .orElseGet(UserAccount::new);
+        boolean isNew = account.getId() == null;
+        account.setUsername(seed.username());
+        account.setDisplayName(seed.displayName());
+        account.setRole(seed.role());
+        if (isNew || account.getPasswordHash() == null || account.getPasswordHash().isBlank()) {
+          account.setPasswordHash(passwordHashService.hash(seed.password()));
+        } else if (!passwordHashService.isHashed(account.getPasswordHash())) {
+          account.setPasswordHash(passwordHashService.hash(account.getPasswordHash()));
+        }
+        if (account.getEnabled() == null) account.setEnabled(true);
+        accounts.save(account);
+      });
+  }
+
+  private UserAccount getAccount(Long id) {
+    return accounts
+      .findById(id)
+      .orElseThrow(() -> new NoSuchElementException("账号不存在"));
+  }
+
+  private void applyMutation(
+    UserAccount account,
+    AccountMutation mutation,
+    boolean creating
+  ) {
+    String role = normalizeRole(mutation.role());
+    account.setDisplayName(nonBlank(mutation.displayName(), account.getUsername()));
+    account.setRole(role);
+    account.setSsoSubject(blankToNull(mutation.ssoSubject()));
+    if (creating) {
+      account.setEnabled(mutation.enabled() == null || mutation.enabled());
+    } else if (mutation.enabled() != null) {
+      account.setEnabled(mutation.enabled());
+    }
+  }
+
+  private void requirePassword(String password, boolean creating) {
+    if (password == null || password.isBlank()) {
+      if (creating) throw new IllegalArgumentException("密码不能为空");
+      return;
+    }
+    if (password.length() < 8) throw new IllegalArgumentException("密码至少 8 位");
+  }
+
+  private boolean isLastEnabledAdmin(UserAccount account) {
+    return (
+      "ADMIN".equals(account.getRole()) &&
+      Boolean.TRUE.equals(account.getEnabled()) &&
+      accounts.countByRoleAndEnabledTrue("ADMIN") <= 1
+    );
+  }
+
+  private SeedAccount parseSeedAccount(String raw) {
     String[] parts = raw.split("\\|", 4);
     if (parts.length != 4) {
       throw new IllegalArgumentException("AUTH_USERS 配置格式错误");
     }
-    return new Account(
+    return new SeedAccount(
       normalize(parts[0]),
       parts[1],
-      parts[2].trim().toUpperCase(Locale.ROOT),
+      normalizeRole(parts[2]),
       parts[3].trim()
     );
   }
 
-  private AuthUser toUser(Account account) {
+  private AuthUser toUser(UserAccount account) {
     return new AuthUser(
-      account.username(),
-      account.displayName(),
-      account.role(),
-      permissionsFor(account.role())
+      account.getUsername(),
+      account.getDisplayName(),
+      account.getRole(),
+      permissionsFor(account.getRole())
+    );
+  }
+
+  private AccountView toView(UserAccount account) {
+    return new AccountView(
+      account.getId(),
+      account.getUsername(),
+      account.getDisplayName(),
+      account.getRole(),
+      Boolean.TRUE.equals(account.getEnabled()),
+      account.getSsoSubject(),
+      account.getLastLoginAt(),
+      account.getCreatedAt(),
+      account.getUpdatedAt()
     );
   }
 
@@ -153,6 +311,7 @@ public class AuthService {
         "issue:status",
         "issue:log",
         "field:manage",
+        "account:manage",
         "ai:execute"
       );
       case "PRODUCT" -> List.of(
@@ -207,11 +366,48 @@ public class AuthService {
     return Objects.toString(username, "").trim().toLowerCase(Locale.ROOT);
   }
 
-  private record Account(
+  private String normalizeRole(String role) {
+    String normalized = Objects.toString(role, "").trim().toUpperCase(Locale.ROOT);
+    if (!ROLES.contains(normalized)) throw new IllegalArgumentException("无效角色：" + role);
+    return normalized;
+  }
+
+  private String nonBlank(String value, String fallback) {
+    String text = Objects.toString(value, "").trim();
+    return text.isBlank() ? fallback : text;
+  }
+
+  private String blankToNull(String value) {
+    String text = Objects.toString(value, "").trim();
+    return text.isBlank() ? null : text;
+  }
+
+  private record SeedAccount(
     String username,
     String password,
     String role,
     String displayName
+  ) {}
+
+  public record AccountMutation(
+    String username,
+    String password,
+    String displayName,
+    String role,
+    Boolean enabled,
+    String ssoSubject
+  ) {}
+
+  public record AccountView(
+    Long id,
+    String username,
+    String displayName,
+    String role,
+    boolean enabled,
+    String ssoSubject,
+    LocalDateTime lastLoginAt,
+    LocalDateTime createdAt,
+    LocalDateTime updatedAt
   ) {}
 
   public record AuthUser(
@@ -222,4 +418,8 @@ public class AuthService {
   ) {}
 
   public record AuthSession(String token, AuthUser user, long expiresAt) {}
+
+  public record SsoConfig(boolean enabled, String providerName) {}
+
+  public record SsoLoginResponse(String providerName, String loginUrl) {}
 }

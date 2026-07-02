@@ -1,5 +1,7 @@
 import axios from "axios";
 import type {
+  Account,
+  AccountPayload,
   AuthSession,
   AuthUser,
   AuditLog,
@@ -22,6 +24,8 @@ import type {
   RetrospectiveDraft,
   RetrospectiveAiSuggestion,
   RetrospectiveOverview,
+  SsoConfig,
+  SsoLoginResponse,
   TrendPoint,
 } from "./types";
 
@@ -152,6 +156,38 @@ export const issueApi = {
   me: () =>
     http
       .get<unknown, ApiResponse<AuthUser>>("/auth/me")
+      .then((response) => response.data),
+
+  ssoConfig: () =>
+    http
+      .get<unknown, ApiResponse<SsoConfig>>("/auth/sso/config")
+      .then((response) => response.data),
+
+  ssoLogin: () =>
+    http
+      .post<unknown, ApiResponse<SsoLoginResponse>>("/auth/sso/login")
+      .then((response) => response.data),
+
+  accounts: () =>
+    http
+      .get<unknown, ApiResponse<Account[]>>("/accounts")
+      .then((response) => response.data),
+
+  accountCreate: (data: AccountPayload) =>
+    http
+      .post<unknown, ApiResponse<Account>>("/accounts", data)
+      .then((response) => response.data),
+
+  accountUpdate: (id: number, data: AccountPayload) =>
+    http
+      .put<unknown, ApiResponse<Account>>(`/accounts/${id}`, data)
+      .then((response) => response.data),
+
+  accountEnabled: (id: number, enabled: boolean) =>
+    http
+      .patch<unknown, ApiResponse<Account>>(`/accounts/${id}/enabled`, {
+        enabled,
+      })
       .then((response) => response.data),
 
   list: (params: Record<string, unknown>) =>

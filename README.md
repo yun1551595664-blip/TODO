@@ -14,7 +14,7 @@
 - 处理记录：详情页直接新增。
 - 数据报表：问题概况、高频问题分布、类型/部门分布、处理时长、风险问题和动态优化建议。
 - AI 能力：独立 AI 洞察页、SSE 流式追问、AI 生成待确认操作草稿、问题详情归因/建议/重复判断；未配置模型时使用本地规则兜底。
-- 登录与角色：内置内部账号登录，按角色控制新增/编辑/删除、状态流转、字段配置和 AI 草稿执行。
+- 登录与角色：内置内部账号登录，账号落库管理，密码 PBKDF2 哈希保存，支持禁用账号、字段配置和 AI 草稿执行权限控制。
 - 操作日志：问题新增、编辑、删除、状态变更、复发标记、处理记录和 AI 确认执行动作均写入审计，并可在问题详情页查看。
 - CI：GitHub Actions 自动执行后端测试、前端构建和提交内容检查。
 - 统一响应：`{ code, message, data }`；统一异常处理。
@@ -70,7 +70,7 @@ npm run dev
 
 ### 默认登录账号
 
-第一版使用后端环境变量维护内部账号，默认账号仅用于本地开发和演示：
+系统启动时会把 `AUTH_USERS` 中的账号同步为数据库账号；之后可由管理员在左侧 `账号管理` 页面新增、编辑、停用账号或重置密码。默认账号仅用于本地开发和演示：
 
 | 角色 | 账号 | 密码 | 权限 |
 | --- | --- | --- | --- |
@@ -80,7 +80,7 @@ npm run dev
 | 客服 | `cs` | `cs123` | 新增问题、追加处理记录 |
 | 观察员 | `viewer` | `viewer123` | 只读 |
 
-生产部署时请在 `.env` 中覆盖：
+生产部署时请在 `.env` 中覆盖初始种子账号和认证密钥：
 
 ```text
 AUTH_SECRET=change-this-to-a-long-random-secret
@@ -88,7 +88,17 @@ AUTH_TOKEN_TTL_SECONDS=28800
 AUTH_USERS=admin|admin123|ADMIN|照远;product|product123|PRODUCT|产品负责人
 ```
 
-`AUTH_USERS` 格式为 `账号|密码|角色|显示名`，多个账号用英文分号分隔。当前角色支持 `ADMIN`、`PRODUCT`、`TECH`、`CS`、`VIEWER`。
+`AUTH_USERS` 格式为 `账号|密码|角色|显示名`，多个账号用英文分号分隔。当前角色支持 `ADMIN`、`PRODUCT`、`TECH`、`CS`、`VIEWER`。这些账号只用于初始化和补齐，不会在数据库中明文保存密码。
+
+### 企业 SSO 配置
+
+第一版已预留企业 SSO 入口和配置项。未配置时登录页会提示“企业 SSO 尚未启用”，仍使用账号密码登录。真实接入企业微信、OIDC 或 LDAP 时，需要补充对应回调和身份映射。
+
+```text
+AUTH_SSO_ENABLED=false
+AUTH_SSO_PROVIDER_NAME=企业 SSO
+AUTH_SSO_LOGIN_URL=
+```
 
 ## Docker Compose 启动
 
@@ -220,6 +230,12 @@ AI 接口会先执行本地规则计算，再调用 OpenAI-compatible 大模型�
 | PATCH | `/api/dictionaries/{id}/enabled` | 启用/停用字段选项 |
 | DELETE | `/api/dictionaries/{id}` | 删除未被引用的字段选项 |
 | GET | `/api/dictionaries/{id}/usage` | 查询字段选项引用数量 |
+| GET | `/api/accounts` | 账号列表，管理员 |
+| POST | `/api/accounts` | 新增账号，管理员 |
+| PUT | `/api/accounts/{id}` | 编辑账号/重置密码，管理员 |
+| PATCH | `/api/accounts/{id}/enabled` | 启用/停用账号，管理员 |
+| GET | `/api/auth/sso/config` | 获取企业 SSO 启用状态 |
+| POST | `/api/auth/sso/login` | 获取企业 SSO 登录跳转地址 |
 
 字段配置支持的 `type`：
 
@@ -234,7 +250,7 @@ IMPACT_SCOPE    影响范围
 
 ## 后续建议
 
-1. 接入 SSO 与部门/角色权限，补充字段级审计和全局审计查询。
+1. 完成真实企业 SSO 回调、部门同步和字段级权限。
 2. 附件升级为对象存储上传，TAPD 增加双向同步与 Webhook。
 3. 增加通知订阅、SLA 分级规则、自动升级和定期复盘任务。
 4. 为核心前端流程补充 Playwright E2E，覆盖新增问题、状态流转、AI 草稿确认。

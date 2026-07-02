@@ -4,6 +4,8 @@ import com.company.issueops.common.ApiResponse;
 import com.company.issueops.service.AuthService;
 import com.company.issueops.service.AuthService.AuthSession;
 import com.company.issueops.service.AuthService.AuthUser;
+import com.company.issueops.service.AuthService.SsoConfig;
+import com.company.issueops.service.AuthService.SsoLoginResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.util.Map;
@@ -38,5 +40,20 @@ public class AuthController {
     return ApiResponse.ok(
       (AuthUser) request.getAttribute(AuthService.REQUEST_USER_ATTRIBUTE)
     );
+  }
+
+  @GetMapping("/sso/config")
+  ApiResponse<SsoConfig> ssoConfig() {
+    return ApiResponse.ok(authService.ssoConfig());
+  }
+
+  @PostMapping("/sso/login")
+  ApiResponse<SsoLoginResponse> ssoLogin(HttpServletResponse response) {
+    try {
+      return ApiResponse.ok(authService.ssoLogin());
+    } catch (IllegalStateException e) {
+      response.setStatus(HttpServletResponse.SC_NOT_IMPLEMENTED);
+      return new ApiResponse<>(501, e.getMessage(), null);
+    }
   }
 }

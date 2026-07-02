@@ -4,14 +4,17 @@ import {
   FieldTimeOutlined,
   LockOutlined,
   RobotOutlined,
+  SafetyCertificateOutlined,
   StarFilled,
   UnorderedListOutlined,
   UserOutlined,
 } from "@ant-design/icons";
 import { Button, Checkbox, Form, Input, message } from "antd";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { issueApi } from "../api";
 import { useAuth } from "../auth";
+import type { SsoConfig } from "../types";
 
 type LoginValues = {
   username: string;
@@ -54,10 +57,19 @@ const capabilities = [
 export default function LoginPage() {
   const { user, login } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [ssoLoading, setSsoLoading] = useState(false);
+  const [ssoConfig, setSsoConfig] = useState<SsoConfig>();
   const navigate = useNavigate();
   const location = useLocation();
   const from = (location.state as { from?: { pathname?: string } } | null)?.from
     ?.pathname;
+
+  useEffect(() => {
+    issueApi
+      .ssoConfig()
+      .then(setSsoConfig)
+      .catch(() => setSsoConfig(undefined));
+  }, []);
 
   if (user) return <Navigate to={from || "/"} replace />;
 
@@ -71,6 +83,22 @@ export default function LoginPage() {
       message.error(error instanceof Error ? error.message : "登录失败");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loginWithSso = async () => {
+    if (!ssoConfig?.enabled) {
+      message.warning("企业 SSO 尚未启用，请先使用账号密码登录");
+      return;
+    }
+    setSsoLoading(true);
+    try {
+      const result = await issueApi.ssoLogin();
+      window.location.href = result.loginUrl;
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "SSO 登录失败");
+    } finally {
+      setSsoLoading(false);
     }
   };
 
@@ -171,6 +199,17 @@ export default function LoginPage() {
               size="large"
             >
               进入工作台
+            </Button>
+            <Button
+              className="login-sso-button"
+              icon={<SafetyCertificateOutlined />}
+              loading={ssoLoading}
+              block
+              size="large"
+              htmlType="button"
+              onClick={loginWithSso}
+            >
+              {ssoConfig?.providerName || "企业 SSO"} 登录
             </Button>
           </Form>
           <div className="login-footnote">

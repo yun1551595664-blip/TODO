@@ -9,6 +9,7 @@ import {
   SettingOutlined,
   StarFilled,
   SwapOutlined,
+  TeamOutlined,
 } from "@ant-design/icons";
 import { Button, Tooltip } from "antd";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -68,6 +69,14 @@ export default function AppLayout() {
               <SettingOutlined
                 className="rail-icon"
                 onClick={() => nav("/settings/fields")}
+              />
+            </Tooltip>
+          )}
+          {hasPermission("account:manage") && (
+            <Tooltip title="账号管理" placement="right">
+              <TeamOutlined
+                className="rail-icon"
+                onClick={() => nav("/settings/accounts")}
               />
             </Tooltip>
           )}

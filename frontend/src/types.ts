@@ -95,6 +95,39 @@ export type AuthSession = {
   expiresAt: number;
 };
 
+export type AccountRole = "ADMIN" | "PRODUCT" | "TECH" | "CS" | "VIEWER";
+
+export type Account = {
+  id: number;
+  username: string;
+  displayName: string;
+  role: AccountRole | string;
+  enabled: boolean;
+  ssoSubject?: string;
+  lastLoginAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type AccountPayload = {
+  username?: string;
+  password?: string;
+  displayName: string;
+  role: AccountRole | string;
+  enabled?: boolean;
+  ssoSubject?: string;
+};
+
+export type SsoConfig = {
+  enabled: boolean;
+  providerName: string;
+};
+
+export type SsoLoginResponse = {
+  providerName: string;
+  loginUrl: string;
+};
+
 export type AiRiskKey = "overdue" | "reopened" | "highPriority";
 
 export type AiRiskRadarItem = {

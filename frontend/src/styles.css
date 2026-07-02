@@ -435,6 +435,13 @@ a {
   box-shadow: 0 15px 36px rgba(108, 99, 255, 0.26);
   font-weight: 660;
 }
+.login-sso-button {
+  height: 52px;
+  margin-top: 14px;
+  border-radius: 12px;
+  color: #5f55ff;
+  font-weight: 620;
+}
 .login-footnote {
   display: flex;
   justify-content: center;
@@ -3761,6 +3768,24 @@ a {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
+}
+.account-settings-surface {
+  display: grid;
+  gap: 16px;
+}
+.account-security-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #eeeef8;
+  border-radius: 12px;
+  background: #fbfbff;
+  color: #6e6e73;
+  font-size: 13px;
+}
+.account-security-note svg {
+  color: #6258ff;
 }
 .rail-icon {
   cursor: pointer;

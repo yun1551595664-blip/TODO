@@ -8,6 +8,7 @@ import IssueDetail from "./pages/IssueDetail";
 import DataReport from "./pages/DataReport";
 import AiInsightPage from "./pages/AiInsightPage";
 import FieldSettings from "./pages/FieldSettings";
+import AccountSettings from "./pages/AccountSettings";
 import RetrospectivePage from "./pages/RetrospectivePage";
 import LoginPage from "./pages/LoginPage";
 export default function App() {
@@ -35,6 +36,14 @@ export default function App() {
             element={
               <RequirePermission permission="field:manage">
                 <FieldSettings />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="settings/accounts"
+            element={
+              <RequirePermission permission="account:manage">
+                <AccountSettings />
               </RequirePermission>
             }
           />
