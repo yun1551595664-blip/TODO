@@ -233,12 +233,12 @@ public class IssueService {
     List<Issue> all = issues
       .findAll()
       .stream()
-      .filter(i -> !i.getDeleted())
+      .filter(this::isActive)
       .toList();
     LocalDateTime month = today().withDayOfMonth(1).atStartOfDay();
     Map<String, Long> status = all
       .stream()
-      .collect(Collectors.groupingBy(Issue::getStatus, Collectors.counting()));
+      .collect(Collectors.groupingBy(this::safeStatus, Collectors.counting()));
     long completed = status.getOrDefault("已完成", 0L);
     long reopened = all.stream().filter(i -> Boolean.TRUE.equals(i.getReopened())).count();
     long overdue = all.stream().filter(this::isOverdue).count();
@@ -285,7 +285,7 @@ public class IssueService {
     List<Issue> all = issues
       .findAll()
       .stream()
-      .filter(i -> !i.getDeleted())
+      .filter(this::isActive)
       .toList();
     return buildTrend(all, range);
   }
@@ -294,7 +294,7 @@ public class IssueService {
     List<Issue> all = issues
       .findAll()
       .stream()
-      .filter(i -> !i.getDeleted())
+      .filter(this::isActive)
       .toList();
     LocalDateTime recentStart = today().minusDays(30).atStartOfDay();
     List<Issue> recent = all
@@ -527,7 +527,7 @@ public class IssueService {
     List<Issue> all = issues
       .findAll()
       .stream()
-      .filter(i -> !i.getDeleted())
+      .filter(this::isActive)
       .toList();
     List<Map<String, Object>> types = all
       .stream()
@@ -690,6 +690,15 @@ public class IssueService {
     );
     String type = Optional.ofNullable(issue.getIssueType()).orElse("其他问题");
     return scene + " · " + type;
+  }
+
+  private boolean isActive(Issue issue) {
+    return !Boolean.TRUE.equals(issue.getDeleted());
+  }
+
+  private String safeStatus(Issue issue) {
+    String status = issue.getStatus();
+    return status == null || status.isBlank() ? "待处理" : status;
   }
 
   private boolean isOverdue(Issue issue) {

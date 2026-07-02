@@ -76,7 +76,10 @@ class IssueServiceTest {
     completed.setCreatedAt(LocalDateTime.now());
     completed.setUpdatedAt(LocalDateTime.now().minusDays(1));
     completed.setActualFinishTime(LocalDateTime.now());
-    when(issues.findAll()).thenReturn(List.of(pending, completed));
+    Issue legacy = issue(3L, null);
+    legacy.setDeleted(null);
+    legacy.setCreatedAt(LocalDateTime.now());
+    when(issues.findAll()).thenReturn(List.of(pending, completed, legacy));
 
     Map<String, Object> result = service.dashboard();
 
@@ -100,7 +103,8 @@ class IssueServiceTest {
       "completionRate",
       "trend"
     );
-    assertThat(result.get("total")).isEqualTo(2L);
+    assertThat(result.get("total")).isEqualTo(3L);
+    assertThat(result.get("pending")).isEqualTo(2L);
     assertThat(result.get("completed")).isEqualTo(1L);
     assertThat(result.get("reopened")).isEqualTo(1L);
     assertThat(result.get("overdue")).isEqualTo(1L);
