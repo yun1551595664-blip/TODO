@@ -23,29 +23,6 @@ import { issueApi } from "../api";
 import StatusTag from "../components/StatusTag";
 import type { DashboardData, Issue, TrendPoint } from "../types";
 
-const mockSummary: DashboardData = {
-  total: 156,
-  pending: 28,
-  processing: 76,
-  verifying: 18,
-  completed: 64,
-  reopened: 6,
-  overdue: 9,
-  monthlyNew: 28,
-  monthlyCompleted: 12,
-};
-
-const mockTrend: TrendPoint[] = [
-  { date: "2026-05-05", 新增: 28, 完成: 12, 待处理: 76 },
-  { date: "2026-05-12", 新增: 31, 完成: 15, 待处理: 80 },
-  { date: "2026-05-19", 新增: 36, 完成: 19, 待处理: 88 },
-  { date: "2026-05-26", 新增: 24, 完成: 18, 待处理: 75 },
-  { date: "2026-06-02", 新增: 22, 完成: 14, 待处理: 66 },
-  { date: "2026-06-09", 新增: 27, 完成: 20, 待处理: 73 },
-  { date: "2026-06-16", 新增: 23, 完成: 17, 待处理: 67 },
-  { date: "2026-06-23", 新增: 28, 完成: 21, 待处理: 70 },
-];
-
 const trendRangeOptions = [
   { value: "8w", label: "近 8 周" },
   { value: "12w", label: "近 12 周" },
@@ -199,6 +176,8 @@ export default function Dashboard() {
   const [issues, setIssues] = useState<Issue[]>([]);
   const [pageLoading, setPageLoading] = useState(true);
   const [trendLoading, setTrendLoading] = useState(false);
+  const [pageError, setPageError] = useState("");
+  const [trendError, setTrendError] = useState("");
   const [trendRange, setTrendRange] = useState("8w");
   const [now, setNow] = useState(() => new Date());
   const [lastUpdatedAt, setLastUpdatedAt] = useState(() => new Date());
@@ -206,12 +185,16 @@ export default function Dashboard() {
 
   const loadTrend = async (range = trendRange) => {
     setTrendLoading(true);
+    setTrendError("");
     try {
       const nextTrend = await issueApi.trend(range);
       setTrend(nextTrend);
-    } catch {
-      setTrend(mockTrend);
-      message.warning("趋势数据加载失败，当前展示演示数据");
+    } catch (error) {
+      setTrend([]);
+      const errorMessage =
+        error instanceof Error ? error.message : "趋势数据加载失败";
+      setTrendError(errorMessage);
+      message.error(errorMessage);
     } finally {
       setTrendLoading(false);
     }
@@ -219,6 +202,8 @@ export default function Dashboard() {
 
   const loadPage = async () => {
     setPageLoading(true);
+    setPageError("");
+    setTrendError("");
     try {
       const [statistics, issuePage, trendData] = await Promise.all([
         issueApi.dashboard(),
@@ -231,14 +216,17 @@ export default function Dashboard() {
       const current = new Date();
       setNow(current);
       setLastUpdatedAt(parseDateOrNow(statistics.updatedAt));
-    } catch {
+    } catch (error) {
       const current = new Date();
-      setData(mockSummary);
-      setTrend(mockTrend);
+      const errorMessage =
+        error instanceof Error ? error.message : "首页数据加载失败";
+      setData(undefined);
+      setTrend([]);
       setIssues([]);
       setNow(current);
       setLastUpdatedAt(current);
-      message.warning("后端未连接，当前展示演示数据");
+      setPageError(errorMessage);
+      message.error(errorMessage);
     } finally {
       setPageLoading(false);
     }
@@ -266,7 +254,34 @@ export default function Dashboard() {
     );
   }
 
-  const d = data || mockSummary;
+  if (!data) {
+    return (
+      <div className="page dashboard">
+        <div className="page-heading">
+          <div>
+            <h1>
+              {greetingByTime(now)}，照远 <StarFilled className="sparkle" />
+            </h1>
+            <p>产品与业务问题进度管理 · 全局概览</p>
+          </div>
+          <div className="data-time">
+            <ReloadOutlined onClick={loadPage} />
+          </div>
+        </div>
+        <div className="empty-state-panel">
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={pageError || "首页数据暂不可用"}
+          />
+          <Button type="primary" onClick={loadPage}>
+            重新加载
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const d = data;
   const metrics = [
     { label: "问题总数", value: d.total, note: "全部问题" },
     { label: "待处理", value: d.pending, note: "等待分派" },
@@ -278,7 +293,7 @@ export default function Dashboard() {
     { label: "本月新增", value: d.monthlyNew, note: "本月创建" },
     { label: "本月完成", value: d.monthlyCompleted, note: "本月闭环" },
   ];
-  const trendChartData = buildTrendChartData(trend.length ? trend : mockTrend);
+  const trendChartData = buildTrendChartData(trend);
   const lastTrendDate = trendChartData.at(-1)?.date;
   const trendTickInterval = trendRange === "30d" ? 4 : trendRange === "12w" ? 1 : 0;
   const { dateText, timeText } = formatDashboardDateTime(lastUpdatedAt);
@@ -344,99 +359,117 @@ export default function Dashboard() {
             </span>
           </div>
           <Spin spinning={trendLoading} size="small">
-            <ResponsiveContainer width="100%" height={190}>
-              <ComposedChart
-                data={trendChartData}
-                margin={{ top: 14, right: 12, bottom: 0, left: -18 }}
-              >
-                <defs>
-                  <linearGradient id="trendNewGradient" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="0%" stopColor="#6c63ff" stopOpacity={0.24} />
-                    <stop offset="72%" stopColor="#6c63ff" stopOpacity={0.07} />
-                    <stop offset="100%" stopColor="#6c63ff" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient
-                    id="trendPendingGradient"
-                    x1="0"
-                    x2="0"
-                    y1="0"
-                    y2="1"
-                  >
-                    <stop offset="0%" stopColor="#c9c5ff" stopOpacity={0.24} />
-                    <stop offset="100%" stopColor="#c9c5ff" stopOpacity={0.04} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="#f0f0f4" vertical={false} />
-                <XAxis
-                  dataKey="date"
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={formatTrendTick}
-                  tickMargin={10}
-                  interval={trendTickInterval}
-                  minTickGap={8}
-                  tick={(props) => (
-                    <TrendXAxisTick {...props} lastDate={lastTrendDate} />
-                  )}
-                />
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  allowDecimals={false}
-                  domain={[0, (dataMax: number) => Math.max(5, Math.ceil(dataMax * 1.2))]}
-                  tick={{ fill: "#6e6e73", fontSize: 12 }}
-                  tickMargin={8}
-                />
-                <Tooltip content={<TrendTooltip />} cursor={false} />
-                {lastTrendDate && (
-                  <ReferenceLine
-                    x={lastTrendDate}
-                    stroke="#d7d5e5"
-                    strokeDasharray="3 3"
+            {trendChartData.length ? (
+              <ResponsiveContainer width="100%" height={190}>
+                <ComposedChart
+                  data={trendChartData}
+                  margin={{ top: 14, right: 12, bottom: 0, left: -18 }}
+                >
+                  <defs>
+                    <linearGradient
+                      id="trendNewGradient"
+                      x1="0"
+                      x2="0"
+                      y1="0"
+                      y2="1"
+                    >
+                      <stop offset="0%" stopColor="#6c63ff" stopOpacity={0.24} />
+                      <stop offset="72%" stopColor="#6c63ff" stopOpacity={0.07} />
+                      <stop offset="100%" stopColor="#6c63ff" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient
+                      id="trendPendingGradient"
+                      x1="0"
+                      x2="0"
+                      y1="0"
+                      y2="1"
+                    >
+                      <stop offset="0%" stopColor="#c9c5ff" stopOpacity={0.24} />
+                      <stop offset="100%" stopColor="#c9c5ff" stopOpacity={0.04} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="#f0f0f4" vertical={false} />
+                  <XAxis
+                    dataKey="date"
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={formatTrendTick}
+                    tickMargin={10}
+                    interval={trendTickInterval}
+                    minTickGap={8}
+                    tick={(props) => (
+                      <TrendXAxisTick {...props} lastDate={lastTrendDate} />
+                    )}
                   />
-                )}
-                <Area
-                  type="monotone"
-                  dataKey="待处理趋势"
-                  name="待处理问题"
-                  stroke="none"
-                  fill="url(#trendPendingGradient)"
-                  isAnimationActive={false}
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    allowDecimals={false}
+                    domain={[
+                      0,
+                      (dataMax: number) => Math.max(5, Math.ceil(dataMax * 1.2)),
+                    ]}
+                    tick={{ fill: "#6e6e73", fontSize: 12 }}
+                    tickMargin={8}
+                  />
+                  <Tooltip content={<TrendTooltip />} cursor={false} />
+                  {lastTrendDate && (
+                    <ReferenceLine
+                      x={lastTrendDate}
+                      stroke="#d7d5e5"
+                      strokeDasharray="3 3"
+                    />
+                  )}
+                  <Area
+                    type="monotone"
+                    dataKey="待处理趋势"
+                    name="待处理问题"
+                    stroke="none"
+                    fill="url(#trendPendingGradient)"
+                    isAnimationActive={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="完成趋势"
+                    name="已完成问题"
+                    stroke="#938aff"
+                    fill="transparent"
+                    strokeDasharray="5 5"
+                    strokeWidth={2.8}
+                    strokeLinecap="round"
+                    dot={
+                      lastTrendDate
+                        ? renderLastPointDot(lastTrendDate, "#938aff", 3.8)
+                        : false
+                    }
+                    activeDot={{ r: 4, stroke: "#fff", strokeWidth: 2 }}
+                    isAnimationActive={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="新增趋势"
+                    name="新增问题"
+                    stroke="#5f55ff"
+                    strokeWidth={2.6}
+                    strokeLinecap="round"
+                    dot={
+                      lastTrendDate
+                        ? renderLastPointDot(lastTrendDate, "#5f55ff", 4.4)
+                        : false
+                    }
+                    activeDot={{ r: 5, stroke: "#fff", strokeWidth: 2 }}
+                    isAnimationActive={false}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="chart-empty">
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={trendError || "暂无趋势数据"}
                 />
-                <Line
-                  type="monotone"
-                  dataKey="完成趋势"
-                  name="已完成问题"
-                  stroke="#938aff"
-                  fill="transparent"
-                  strokeDasharray="5 5"
-                  strokeWidth={2.8}
-                  strokeLinecap="round"
-                  dot={
-                    lastTrendDate
-                      ? renderLastPointDot(lastTrendDate, "#938aff", 3.8)
-                      : false
-                  }
-                  activeDot={{ r: 4, stroke: "#fff", strokeWidth: 2 }}
-                  isAnimationActive={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="新增趋势"
-                  name="新增问题"
-                  stroke="#5f55ff"
-                  strokeWidth={2.6}
-                  strokeLinecap="round"
-                  dot={
-                    lastTrendDate
-                      ? renderLastPointDot(lastTrendDate, "#5f55ff", 4.4)
-                      : false
-                  }
-                  activeDot={{ r: 5, stroke: "#fff", strokeWidth: 2 }}
-                  isAnimationActive={false}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
+              </div>
+            )}
           </Spin>
         </div>
 

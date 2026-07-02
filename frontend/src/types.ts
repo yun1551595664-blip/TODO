@@ -36,6 +36,23 @@ export type IssueLog = {
   createdAt: string;
 };
 
+export type AuditLog = {
+  id: number;
+  operatorName?: string;
+  operatorRole?: string;
+  actionType: string;
+  targetType: string;
+  targetId?: string;
+  targetNo?: string;
+  source: "MANUAL" | "AI" | string;
+  aiActionId?: string;
+  beforeData?: string;
+  afterData?: string;
+  ip?: string;
+  userAgent?: string;
+  createdAt: string;
+};
+
 export type PageData<T> = {
   content: T[];
   totalElements: number;

@@ -2,6 +2,7 @@ import axios from "axios";
 import type {
   AuthSession,
   AuthUser,
+  AuditLog,
   AiChatAnswer,
   AiActionExecution,
   AiInsightMessage,
@@ -161,6 +162,11 @@ export const issueApi = {
   get: (id: string | number) =>
     http
       .get<unknown, ApiResponse<Issue>>(`/issues/${id}`)
+      .then((response) => response.data),
+
+  audits: (id: string | number) =>
+    http
+      .get<unknown, ApiResponse<AuditLog[]>>(`/issues/${id}/audits`)
       .then((response) => response.data),
 
   create: (data: Partial<Issue>) =>

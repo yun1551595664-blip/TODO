@@ -9,6 +9,7 @@ import {
 import {
   Button,
   Divider,
+  Empty,
   Input,
   Modal,
   Select,
@@ -23,13 +24,39 @@ import { issueApi } from "../api";
 import { useAuth } from "../auth";
 import RecurrenceInsightCard from "../components/RecurrenceInsightCard";
 import StatusTag from "../components/StatusTag";
-import type { Issue, IssueAiAnalysis } from "../types";
+import type { AuditLog, Issue, IssueAiAnalysis } from "../types";
 const statuses = ["待处理", "处理中", "待验证", "已完成"];
+const auditActionLabels: Record<string, string> = {
+  CREATE_ISSUE: "新增问题",
+  UPDATE_ISSUE: "编辑问题",
+  DELETE_ISSUE: "删除问题",
+  CHANGE_STATUS: "状态变更",
+  MARK_REOPENED: "标记复发",
+  CLEAR_REOPENED: "取消复发",
+  ADD_ISSUE_LOG: "新增处理记录",
+  AI_ACTION_EXECUTE: "AI 执行动作",
+};
+
+function auditActionLabel(actionType: string) {
+  return auditActionLabels[actionType] || actionType;
+}
+
+function auditSourceLabel(source?: string) {
+  return source === "AI" ? "AI 执行" : "人工操作";
+}
+
+function auditTimelineColor(log: AuditLog) {
+  if (log.source === "AI") return "#6c63ff";
+  if (log.actionType === "DELETE_ISSUE") return "#ff4d4f";
+  return "#a1a1a6";
+}
+
 export default function IssueDetail() {
   const { id } = useParams();
   const nav = useNavigate();
   const { user, hasPermission } = useAuth();
   const [issue, setIssue] = useState<Issue>();
+  const [audits, setAudits] = useState<AuditLog[]>([]);
   const [statusOpen, setStatusOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [reopenedOpen, setReopenedOpen] = useState(false);
@@ -39,11 +66,22 @@ export default function IssueDetail() {
   const [operator, setOperator] = useState(user?.displayName || "");
   const [aiResult, setAiResult] = useState<IssueAiAnalysis>();
   const [aiLoadingType, setAiLoadingType] = useState("");
-  const load = () =>
-    issueApi
-      .get(Number(id))
-      .then(setIssue)
-      .catch((e) => message.error(e.message));
+  const load = async () => {
+    try {
+      const issueData = await issueApi.get(Number(id));
+      setIssue(issueData);
+      try {
+        setAudits(await issueApi.audits(Number(id)));
+      } catch (error) {
+        setAudits([]);
+        message.warning(
+          error instanceof Error ? error.message : "操作留痕加载失败",
+        );
+      }
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "问题详情加载失败");
+    }
+  };
   useEffect(() => {
     void load();
   }, [id]);
@@ -210,6 +248,39 @@ export default function IssueDetail() {
                 ),
               }))}
             />
+          </section>
+          <Divider />
+          <section>
+            <h3>操作留痕</h3>
+            {audits.length ? (
+              <Timeline
+                className="audit-timeline"
+                items={audits.map((log) => ({
+                  color: auditTimelineColor(log),
+                  children: (
+                    <div>
+                      <b>{auditActionLabel(log.actionType)}</b>
+                      <small>
+                        {dayjs(log.createdAt).format("MM-DD HH:mm")} ·{" "}
+                        {log.operatorName || "system"}
+                      </small>
+                      <p>
+                        <em className={`audit-source ${log.source === "AI" ? "ai" : ""}`}>
+                          {auditSourceLabel(log.source)}
+                        </em>
+                        {log.operatorRole && <span>{log.operatorRole}</span>}
+                        {log.aiActionId && <span>AI 动作 {log.aiActionId}</span>}
+                      </p>
+                    </div>
+                  ),
+                }))}
+              />
+            ) : (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description="暂无操作留痕"
+              />
+            )}
           </section>
           <Divider />
           <section>

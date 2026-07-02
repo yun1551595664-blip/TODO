@@ -1,6 +1,7 @@
 package com.company.issueops.web;
 
 import com.company.issueops.common.ApiResponse;
+import com.company.issueops.domain.AuditLog;
 import com.company.issueops.domain.Issue;
 import com.company.issueops.domain.IssueLog;
 import com.company.issueops.service.AuditLogService;
@@ -57,6 +58,12 @@ public class IssueController {
   @GetMapping("/issues/{id}")
   ApiResponse<Issue> get(@PathVariable Long id) {
     return ApiResponse.ok(service.get(id));
+  }
+
+  @GetMapping("/issues/{id}/audits")
+  ApiResponse<List<AuditLog>> audits(@PathVariable Long id) {
+    service.get(id);
+    return ApiResponse.ok(auditLogService.listIssueAudits(id));
   }
 
   @PostMapping("/issues")

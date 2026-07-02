@@ -659,6 +659,20 @@ a {
   grid-template-columns: 1fr 1.2fr;
   gap: 64px;
 }
+.empty-state-panel {
+  display: grid;
+  place-items: center;
+  gap: 18px;
+  min-height: 360px;
+  border: 1px solid #eeeef2;
+  border-radius: 16px;
+  background: #fff;
+}
+.chart-empty {
+  display: grid;
+  place-items: center;
+  height: 190px;
+}
 .dashboard .attention-head {
   padding: 4px 0;
 }
@@ -2256,6 +2270,26 @@ a {
 .detail-inspector p {
   color: #6e6e73;
   line-height: 1.6;
+}
+.audit-timeline p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 4px 0 0;
+}
+.audit-timeline p span,
+.audit-source {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #f5f5f7;
+  color: #6e6e73;
+  font-size: 12px;
+  font-style: normal;
+}
+.audit-source.ai {
+  background: #f0efff;
+  color: #6258ff;
 }
 .reopened {
   padding: 14px;

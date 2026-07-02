@@ -15,6 +15,7 @@
 - 数据报表：问题概况、高频问题分布、类型/部门分布、处理时长、风险问题和动态优化建议。
 - AI 能力：独立 AI 洞察页、SSE 流式追问、AI 生成待确认操作草稿、问题详情归因/建议/重复判断；未配置模型时使用本地规则兜底。
 - 登录与角色：内置内部账号登录，按角色控制新增/编辑/删除、状态流转、字段配置和 AI 草稿执行。
+- 操作留痕：问题新增、编辑、删除、状态变更、复发标记、处理记录和 AI 确认执行动作均写入审计，并可在问题详情页查看。
 - CI：GitHub Actions 自动执行后端测试、前端构建和提交内容检查。
 - 统一响应：`{ code, message, data }`；统一异常处理。
 
@@ -95,7 +96,7 @@ AUTH_USERS=admin|admin123|ADMIN|照远;product|product123|PRODUCT|产品负责�
 docker compose up -d --build
 ```
 
-- 系统入口：`http://localhost`
+- 系统入口：`http://localhost:18000`
 - 后端：`http://localhost:8080`
 - MySQL：`localhost:3306`
 
@@ -196,6 +197,7 @@ AI 接口会先执行本地规则计算，再调用 OpenAI-compatible 大模型�
 |---|---|---|
 | GET | `/api/issues` | 问题列表、筛选与分页 |
 | GET | `/api/issues/{id}` | 问题详情 |
+| GET | `/api/issues/{id}/audits` | 问题操作留痕 |
 | POST | `/api/issues` | 新增问题 |
 | PUT | `/api/issues/{id}` | 编辑问题 |
 | DELETE | `/api/issues/{id}` | 逻辑删除 |
@@ -232,7 +234,7 @@ IMPACT_SCOPE    影响范围
 
 ## 后续建议
 
-1. 接入 SSO 与部门/角色权限，增加字段级和操作级审计。
+1. 接入 SSO 与部门/角色权限，补充字段级审计和全局审计查询。
 2. 附件升级为对象存储上传，TAPD 增加双向同步与 Webhook。
 3. 增加通知订阅、SLA 分级规则、自动升级和定期复盘任务。
 4. 为核心前端流程补充 Playwright E2E，覆盖新增问题、状态流转、AI 草稿确认。
