@@ -1,7 +1,10 @@
 package com.company.issueops.web;
 
 import com.company.issueops.common.ApiResponse;
+import com.company.issueops.service.AuthService;
+import com.company.issueops.service.AuthService.AuthUser;
 import com.company.issueops.service.RecurrenceInsightService;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -20,13 +23,21 @@ public class RecurrenceInsightController {
 
   /** 全部复发问题的根因归纳。 */
   @GetMapping
-  ApiResponse<Map<String, Object>> all() {
-    return ApiResponse.ok(service.analyzeAll());
+  ApiResponse<Map<String, Object>> all(HttpServletRequest request) {
+    return ApiResponse.ok(service.analyzeAll(currentUser(request)));
   }
 
   /** 单个问题的根因归纳。 */
   @GetMapping("/{id}")
-  ApiResponse<Map<String, Object>> one(@PathVariable Long id) {
-    return ApiResponse.ok(service.analyzeOne(id));
+  ApiResponse<Map<String, Object>> one(
+    @PathVariable Long id,
+    HttpServletRequest request
+  ) {
+    return ApiResponse.ok(service.analyzeOne(currentUser(request), id));
+  }
+
+  private AuthUser currentUser(HttpServletRequest request) {
+    Object value = request.getAttribute(AuthService.REQUEST_USER_ATTRIBUTE);
+    return value instanceof AuthUser user ? user : null;
   }
 }

@@ -2,6 +2,7 @@ package com.company.issueops.service;
 
 import com.company.issueops.domain.Issue;
 import com.company.issueops.repository.IssueRepository;
+import com.company.issueops.service.AuthService.AuthUser;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.time.Duration;
@@ -19,6 +20,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -41,9 +44,10 @@ public class AiInsightService {
   private final AiActionService aiActionService;
   private final AiInsightSessionStore sessionStore;
   private final ObjectMapper objectMapper;
+  private final DataScopeService dataScopeService;
   private final AtomicLong insightSequence = new AtomicLong();
 
-  private volatile Map<String, Object> latestInsight;
+  private final ConcurrentMap<String, Map<String, Object>> latestInsights = new ConcurrentHashMap<>();
 
   @TransactionalEventListener
   public void onIssueChanged(IssueChangedEvent event) {
@@ -51,31 +55,45 @@ public class AiInsightService {
   }
 
   public void invalidate() {
-    latestInsight = null;
+    latestInsights.clear();
   }
 
   public Map<String, Object> overview() {
-    Map<String, Object> cached = latestInsight;
+    return overview(null);
+  }
+
+  public Map<String, Object> overview(AuthUser user) {
+    String scopeKey = dataScopeService.scopeKey(user);
+    Map<String, Object> cached = latestInsights.get(scopeKey);
     if (cached != null) return cached;
-    return refresh();
+    return refresh(user);
   }
 
   public synchronized Map<String, Object> refresh() {
-    List<Issue> issueList = loadIssues();
+    return refresh(null);
+  }
+
+  public synchronized Map<String, Object> refresh(AuthUser user) {
+    List<Issue> issueList = loadIssues(user);
     Map<String, Object> local = buildLocalOverview(issueList);
     Map<String, Object> ruleAnalysis = buildRuleAnalysis(local);
     local.put("ruleAnalysis", ruleAnalysis);
     local.put("aiAnalysis", buildAiAnalysis(null, false));
     local.put("finalView", buildFinalView(local));
     markAiPending(local);
-    latestInsight = local;
+    latestInsights.put(dataScopeService.scopeKey(user), local);
     return local;
   }
 
   public synchronized Map<String, Object> aiAnalysis() {
-    Map<String, Object> local = latestInsight != null
-      ? new LinkedHashMap<>(latestInsight)
-      : buildLocalOverview(loadIssues());
+    return aiAnalysis(null);
+  }
+
+  public synchronized Map<String, Object> aiAnalysis(AuthUser user) {
+    String scopeKey = dataScopeService.scopeKey(user);
+    Map<String, Object> local = latestInsights.containsKey(scopeKey)
+      ? new LinkedHashMap<>(latestInsights.get(scopeKey))
+      : buildLocalOverview(loadIssues(user));
     local.putIfAbsent("ruleAnalysis", buildRuleAnalysis(local));
 
     Optional<Map<String, Object>> generated = aiClient.available()
@@ -91,11 +109,20 @@ public class AiInsightService {
     local.put("aiAnalysis", buildAiAnalysis(generated.orElse(null), aiApplied));
     local.put("finalView", buildFinalView(local));
     markAiResult(local, aiApplied);
-    latestInsight = local;
+    latestInsights.put(scopeKey, local);
     return local;
   }
 
   public Map<String, Object> chat(
+    String question,
+    String insightId,
+    Map<String, Object> context
+  ) {
+    return chat(null, question, insightId, context);
+  }
+
+  public Map<String, Object> chat(
+    AuthUser user,
     String question,
     String insightId,
     Map<String, Object> context
@@ -105,7 +132,7 @@ public class AiInsightService {
       .map(String::trim)
       .filter(value -> !value.isBlank())
       .orElse(DEFAULT_QUESTION);
-    Map<String, Object> current = latestInsight != null ? latestInsight : refresh();
+    Map<String, Object> current = currentInsight(user);
 
     Map<String, Object> interactionContext = normalizeInteractionContext(
       context,
@@ -119,7 +146,7 @@ public class AiInsightService {
       : Optional.empty();
 
     Map<String, Object> answer = generated
-      .map(value -> normalizeChatAnswer(normalizedQuestion, value, current))
+      .map(value -> normalizeChatAnswer(user, normalizedQuestion, value, current))
       .orElseGet(() -> localChatAnswer(normalizedQuestion, current));
     answer.put("insightId", current.get("insightId"));
     answer.put("generatedBy", generated.isPresent() ? aiClient.provider() : "local-rules");
@@ -141,12 +168,17 @@ public class AiInsightService {
   }
 
   public SseEmitter streamChat(String sessionId, Map<String, Object> body) {
+    return streamChat(null, sessionId, body);
+  }
+
+  public SseEmitter streamChat(AuthUser user, String sessionId, Map<String, Object> body) {
     SseEmitter emitter = new SseEmitter(120_000L);
-    Thread.startVirtualThread(() -> runStreamChat(sessionId, body, emitter));
+    Thread.startVirtualThread(() -> runStreamChat(user, sessionId, body, emitter));
     return emitter;
   }
 
   private void runStreamChat(
+    AuthUser user,
     String sessionId,
     Map<String, Object> body,
     SseEmitter emitter
@@ -156,7 +188,7 @@ public class AiInsightService {
       .map(String::trim)
       .filter(value -> !value.isBlank())
       .orElse(DEFAULT_QUESTION);
-    Map<String, Object> current = latestInsight != null ? latestInsight : refresh();
+    Map<String, Object> current = currentInsight(user);
     Map<String, Object> session = sessionStore.ensureSession(
       sessionId,
       stringValue(current.get("insightId"))
@@ -177,7 +209,7 @@ public class AiInsightService {
         answer = localChatAnswer(normalizedQuestion, current);
         emitAnswerAsChunks(emitter, answer, current);
       } else if (hasWriteIntent(normalizedQuestion)) {
-        answer = chat(normalizedQuestion, stringValue(current.get("insightId")), body);
+        answer = chat(user, normalizedQuestion, stringValue(current.get("insightId")), body);
         emitAnswerAsChunks(emitter, answer, current);
       } else {
         Optional<String> streamed = aiClient.chatStream(
@@ -237,11 +269,22 @@ public class AiInsightService {
     }
   }
 
+  private Map<String, Object> currentInsight(AuthUser user) {
+    String scopeKey = dataScopeService.scopeKey(user);
+    Map<String, Object> cached = latestInsights.get(scopeKey);
+    return cached != null ? cached : refresh(user);
+  }
+
   private List<Issue> loadIssues() {
+    return loadIssues(null);
+  }
+
+  private List<Issue> loadIssues(AuthUser user) {
     return issues
       .findAll()
       .stream()
       .filter(issue -> !Boolean.TRUE.equals(issue.getDeleted()))
+      .filter(issue -> user == null || dataScopeService.canSee(user, issue))
       .toList();
   }
 
@@ -836,6 +879,7 @@ public class AiInsightService {
 
   @SuppressWarnings("unchecked")
   private Map<String, Object> normalizeChatAnswer(
+    AuthUser user,
     String question,
     Map<String, Object> generated,
     Map<String, Object> current
@@ -846,6 +890,7 @@ public class AiInsightService {
       false
     );
     Optional<Map<String, Object>> pendingAction = normalizePendingActionForQuestion(
+      user,
       question,
       generated.get("pendingAction"),
       current
@@ -1030,11 +1075,13 @@ public class AiInsightService {
   }
 
   private Optional<Map<String, Object>> normalizePendingActionForQuestion(
+    AuthUser user,
     String question,
     Object rawAction,
     Map<String, Object> current
   ) {
     Optional<Map<String, Object>> action = aiActionService.normalizePendingAction(
+      user,
       rawAction
     );
     if (action.isEmpty()) return Optional.empty();
@@ -1049,6 +1096,7 @@ public class AiInsightService {
       return Optional.empty();
     }
     return aiActionService.registerPendingAction(
+      user,
       action.get(),
       stringValue(current.get("insightId"))
     );

@@ -29,6 +29,12 @@ public class UserAccount {
   @Column(nullable = false, length = 30)
   private String role;
 
+  @Column(length = 80)
+  private String department;
+
+  @Column(name = "data_scope", nullable = false, length = 30)
+  private String dataScope = "DEPARTMENT";
+
   private Boolean enabled = true;
 
   @Column(name = "sso_subject", length = 160)
@@ -47,10 +53,12 @@ public class UserAccount {
   void create() {
     createdAt = updatedAt = LocalDateTime.now();
     if (enabled == null) enabled = true;
+    if (dataScope == null || dataScope.isBlank()) dataScope = "DEPARTMENT";
   }
 
   @PreUpdate
   void update() {
     updatedAt = LocalDateTime.now();
+    if (dataScope == null || dataScope.isBlank()) dataScope = "DEPARTMENT";
   }
 }

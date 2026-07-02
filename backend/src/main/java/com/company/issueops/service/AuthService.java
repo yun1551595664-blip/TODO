@@ -34,6 +34,7 @@ public class AuthService {
   private final ObjectMapper objectMapper;
   private final UserAccountRepository accounts;
   private final PasswordHashService passwordHashService;
+  private final DataScopeService dataScopeService;
 
   @Value("${auth.secret}")
   private String secret;
@@ -218,6 +219,8 @@ public class AuthService {
         account.setUsername(seed.username());
         account.setDisplayName(seed.displayName());
         account.setRole(seed.role());
+        account.setDepartment(seed.department());
+        account.setDataScope(seed.dataScope());
         if (isNew || account.getPasswordHash() == null || account.getPasswordHash().isBlank()) {
           account.setPasswordHash(passwordHashService.hash(seed.password()));
         } else if (!passwordHashService.isHashed(account.getPasswordHash())) {
@@ -242,6 +245,13 @@ public class AuthService {
     String role = normalizeRole(mutation.role());
     account.setDisplayName(nonBlank(mutation.displayName(), account.getUsername()));
     account.setRole(role);
+    account.setDepartment(
+      nonBlank(
+        mutation.department(),
+        dataScopeService.defaultDepartment(role, account.getDisplayName())
+      )
+    );
+    account.setDataScope(dataScopeService.normalizeScope(mutation.dataScope(), role));
     account.setSsoSubject(blankToNull(mutation.ssoSubject()));
     if (creating) {
       account.setEnabled(mutation.enabled() == null || mutation.enabled());
@@ -267,16 +277,19 @@ public class AuthService {
   }
 
   private SeedAccount parseSeedAccount(String raw) {
-    String[] parts = raw.split("\\|", 4);
-    if (parts.length != 4) {
+    String[] parts = raw.split("\\|", -1);
+    if (parts.length < 4 || parts.length > 6) {
       throw new IllegalArgumentException("AUTH_USERS 配置格式错误");
     }
-    return new SeedAccount(
-      normalize(parts[0]),
-      parts[1],
-      normalizeRole(parts[2]),
-      parts[3].trim()
-    );
+    String role = normalizeRole(parts[2]);
+    String displayName = parts[3].trim();
+    String department = parts.length >= 5 && !parts[4].isBlank()
+      ? parts[4].trim()
+      : dataScopeService.defaultDepartment(role, displayName);
+    String dataScope = parts.length >= 6
+      ? dataScopeService.normalizeScope(parts[5], role)
+      : dataScopeService.defaultScope(role);
+    return new SeedAccount(normalize(parts[0]), parts[1], role, displayName, department, dataScope);
   }
 
   private AuthUser toUser(UserAccount account) {
@@ -284,6 +297,8 @@ public class AuthService {
       account.getUsername(),
       account.getDisplayName(),
       account.getRole(),
+      account.getDepartment(),
+      dataScopeService.normalizeScope(account.getDataScope(), account.getRole()),
       permissionsFor(account.getRole())
     );
   }
@@ -294,6 +309,8 @@ public class AuthService {
       account.getUsername(),
       account.getDisplayName(),
       account.getRole(),
+      account.getDepartment(),
+      dataScopeService.normalizeScope(account.getDataScope(), account.getRole()),
       Boolean.TRUE.equals(account.getEnabled()),
       account.getSsoSubject(),
       account.getLastLoginAt(),
@@ -386,7 +403,9 @@ public class AuthService {
     String username,
     String password,
     String role,
-    String displayName
+    String displayName,
+    String department,
+    String dataScope
   ) {}
 
   public record AccountMutation(
@@ -395,6 +414,8 @@ public class AuthService {
     String displayName,
     String role,
     Boolean enabled,
+    String department,
+    String dataScope,
     String ssoSubject
   ) {}
 
@@ -403,6 +424,8 @@ public class AuthService {
     String username,
     String displayName,
     String role,
+    String department,
+    String dataScope,
     boolean enabled,
     String ssoSubject,
     LocalDateTime lastLoginAt,
@@ -414,6 +437,8 @@ public class AuthService {
     String username,
     String displayName,
     String role,
+    String department,
+    String dataScope,
     List<String> permissions
   ) {}
 

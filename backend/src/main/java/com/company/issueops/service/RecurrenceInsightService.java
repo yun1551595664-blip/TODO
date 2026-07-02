@@ -3,6 +3,7 @@ package com.company.issueops.service;
 import com.company.issueops.domain.Issue;
 import com.company.issueops.domain.IssueLog;
 import com.company.issueops.repository.IssueRepository;
+import com.company.issueops.service.AuthService.AuthUser;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -54,10 +55,16 @@ public class RecurrenceInsightService {
   private final IssueRepository issues;
   private final AiClient aiClient;
   private final ObjectMapper objectMapper;
+  private final DataScopeService dataScopeService;
 
   /** 对全部复发问题做根因归纳。 */
   public Map<String, Object> analyzeAll() {
-    List<Issue> all = activeIssues();
+    return analyzeAll(null);
+  }
+
+  /** 对全部复发问题做根因归纳。 */
+  public Map<String, Object> analyzeAll(AuthUser user) {
+    List<Issue> all = activeIssues(user);
     List<Issue> reopened = all
       .stream()
       .filter(issue -> Boolean.TRUE.equals(issue.getReopened()))
@@ -82,7 +89,12 @@ public class RecurrenceInsightService {
 
   /** 对单个问题做根因归纳。 */
   public Map<String, Object> analyzeOne(Long issueId) {
-    List<Issue> all = activeIssues();
+    return analyzeOne(null, issueId);
+  }
+
+  /** 对单个问题做根因归纳。 */
+  public Map<String, Object> analyzeOne(AuthUser user, Long issueId) {
+    List<Issue> all = activeIssues(user);
     Issue issue = all
       .stream()
       .filter(item -> item.getId() != null && item.getId().equals(issueId))
@@ -390,10 +402,15 @@ public class RecurrenceInsightService {
   // ---------------------------------------------------------------------------
 
   private List<Issue> activeIssues() {
+    return activeIssues(null);
+  }
+
+  private List<Issue> activeIssues(AuthUser user) {
     return issues
       .findAll()
       .stream()
       .filter(issue -> !Boolean.TRUE.equals(issue.getDeleted()))
+      .filter(issue -> user == null || dataScopeService.canSee(user, issue))
       .toList();
   }
 

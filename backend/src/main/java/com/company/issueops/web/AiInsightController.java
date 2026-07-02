@@ -33,24 +33,28 @@ public class AiInsightController {
   private final AuditLogService auditLogService;
 
   @GetMapping("/overview")
-  ApiResponse<Map<String, Object>> overview() {
-    return ApiResponse.ok(service.overview());
+  ApiResponse<Map<String, Object>> overview(HttpServletRequest request) {
+    return ApiResponse.ok(service.overview(currentUser(request)));
   }
 
   @PostMapping("/refresh")
-  ApiResponse<Map<String, Object>> refresh() {
-    return ApiResponse.ok(service.refresh());
+  ApiResponse<Map<String, Object>> refresh(HttpServletRequest request) {
+    return ApiResponse.ok(service.refresh(currentUser(request)));
   }
 
   @GetMapping("/ai-analysis")
-  ApiResponse<Map<String, Object>> aiAnalysis() {
-    return ApiResponse.ok(service.aiAnalysis());
+  ApiResponse<Map<String, Object>> aiAnalysis(HttpServletRequest request) {
+    return ApiResponse.ok(service.aiAnalysis(currentUser(request)));
   }
 
   @PostMapping("/chat")
-  ApiResponse<Map<String, Object>> chat(@RequestBody Map<String, Object> body) {
+  ApiResponse<Map<String, Object>> chat(
+    @RequestBody Map<String, Object> body,
+    HttpServletRequest request
+  ) {
     return ApiResponse.ok(
       service.chat(
+        currentUser(request),
         String.valueOf(body.getOrDefault("question", "")),
         String.valueOf(body.getOrDefault("insightId", "")),
         body
@@ -74,9 +78,10 @@ public class AiInsightController {
   )
   SseEmitter streamChat(
     @PathVariable String sessionId,
-    @RequestBody Map<String, Object> body
+    @RequestBody Map<String, Object> body,
+    HttpServletRequest request
   ) {
-    return service.streamChat(sessionId, body);
+    return service.streamChat(currentUser(request), sessionId, body);
   }
 
   @PostMapping("/actions/execute")
@@ -85,9 +90,10 @@ public class AiInsightController {
     @RequestBody Map<String, Object> body,
     HttpServletRequest request
   ) {
-    Map<String, Object> result = actionService.execute(body);
+    AuthUser user = currentUser(request);
+    Map<String, Object> result = actionService.execute(user, body);
     auditLogService.recordAiAction(
-      currentUser(request),
+      user,
       Objects.toString(body.get("actionId"), null),
       body,
       result,

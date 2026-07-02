@@ -2,6 +2,7 @@ package com.company.issueops.service;
 
 import com.company.issueops.domain.Issue;
 import com.company.issueops.repository.IssueRepository;
+import com.company.issueops.service.AuthService.AuthUser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
@@ -30,9 +31,14 @@ public class RetrospectiveService {
   private final IssueRepository issues;
   private final AiClient aiClient;
   private final ObjectMapper objectMapper;
+  private final DataScopeService dataScopeService;
 
   public Map<String, Object> overview() {
-    List<Issue> issueList = loadIssues();
+    return overview(null);
+  }
+
+  public Map<String, Object> overview(AuthUser user) {
+    List<Issue> issueList = loadIssues(user);
     LocalDateTime now = LocalDateTime.now();
     List<Map<String, Object>> queue = issueList
       .stream()
@@ -71,7 +77,11 @@ public class RetrospectiveService {
   }
 
   public Map<String, Object> aiSuggestion() {
-    List<Issue> issueList = loadIssues();
+    return aiSuggestion(null);
+  }
+
+  public Map<String, Object> aiSuggestion(AuthUser user) {
+    List<Issue> issueList = loadIssues(user);
     LocalDateTime now = LocalDateTime.now();
     List<Map<String, Object>> queue = issueList
       .stream()
@@ -89,6 +99,10 @@ public class RetrospectiveService {
   }
 
   public Map<String, Object> draft(Map<String, Object> body) {
+    return draft(null, body);
+  }
+
+  public Map<String, Object> draft(AuthUser user, Map<String, Object> body) {
     if (!aiClient.available()) {
       return map(
         "available",
@@ -103,7 +117,7 @@ public class RetrospectiveService {
     }
 
     Long issueId = longValue(body.get("issueId"));
-    List<Issue> issueList = loadIssues();
+    List<Issue> issueList = loadIssues(user);
     Issue selected = issueList
       .stream()
       .filter(issue -> Objects.equals(issue.getId(), issueId))
@@ -156,10 +170,15 @@ public class RetrospectiveService {
   }
 
   private List<Issue> loadIssues() {
+    return loadIssues(null);
+  }
+
+  private List<Issue> loadIssues(AuthUser user) {
     return issues
       .findAll()
       .stream()
       .filter(issue -> !Boolean.TRUE.equals(issue.getDeleted()))
+      .filter(issue -> user == null || dataScopeService.canSee(user, issue))
       .sorted(
         Comparator
           .comparing(

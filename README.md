@@ -14,7 +14,7 @@
 - 处理记录：详情页直接新增。
 - 数据报表：问题概况、高频问题分布、类型/部门分布、处理时长、风险问题和动态优化建议。
 - AI 能力：独立 AI 洞察页、SSE 流式追问、AI 生成待确认操作草稿、问题详情归因/建议/重复判断；未配置模型时使用本地规则兜底。
-- 登录与角色：内置内部账号登录，账号落库管理，密码 PBKDF2 哈希保存，支持禁用账号、字段配置和 AI 草稿执行权限控制。
+- 登录与角色：内置内部账号登录，账号落库管理，密码 PBKDF2 哈希保存，支持禁用账号、字段配置、数据范围和 AI 草稿执行权限控制。
 - 操作日志：问题新增、编辑、删除、状态变更、复发标记、处理记录和 AI 确认执行动作均写入审计，并可在问题详情页查看。
 - CI：GitHub Actions 自动执行后端测试、前端构建和提交内容检查。
 - 统一响应：`{ code, message, data }`；统一异常处理。
@@ -70,7 +70,7 @@ npm run dev
 
 ### 默认登录账号
 
-系统启动时会把 `AUTH_USERS` 中的账号同步为数据库账号；之后可由管理员在左侧 `账号管理` 页面新增、编辑、停用账号或重置密码。默认账号仅用于本地开发和演示：
+系统启动时会把 `AUTH_USERS` 中的账号同步为数据库账号；之后可由管理员在左侧 `账号管理` 页面新增、编辑、停用账号、配置所属部门、配置数据范围或重置密码。默认账号仅用于本地开发和演示：
 
 | 角色 | 账号 | 密码 | 权限 |
 | --- | --- | --- | --- |
@@ -88,7 +88,20 @@ AUTH_TOKEN_TTL_SECONDS=28800
 AUTH_USERS=admin|admin123|ADMIN|照远;product|product123|PRODUCT|产品负责人
 ```
 
-`AUTH_USERS` 格式为 `账号|密码|角色|显示名`，多个账号用英文分号分隔。当前角色支持 `ADMIN`、`PRODUCT`、`TECH`、`CS`、`VIEWER`。这些账号只用于初始化和补齐，不会在数据库中明文保存密码。
+`AUTH_USERS` 默认格式为 `账号|密码|角色|显示名`，也支持扩展为 `账号|密码|角色|显示名|部门|数据范围`。多个账号用英文分号分隔。当前角色支持 `ADMIN`、`PRODUCT`、`TECH`、`CS`、`VIEWER`。这些账号只用于初始化和补齐，不会在数据库中明文保存密码。
+
+### 数据范围权限
+
+系统已经区分“能不能操作”和“能看哪些数据”：
+
+| 数据范围 | 含义 |
+| --- | --- |
+| `ALL` | 可查看全部问题数据 |
+| `DEPARTMENT` | 可查看责任部门为本人部门、本人创建或指派给本人的问题 |
+| `OWN` | 仅查看本人创建的问题 |
+| `ASSIGNED` | 仅查看责任人为本人的问题 |
+
+数据范围由后端统一过滤，覆盖问题列表、问题详情、首页统计、趋势图、报表、AI 洞察、复盘沉淀、复发分析和 AI 草稿执行。前端展示限制只作为体验补充，不能替代后端过滤。
 
 ### 企业 SSO 配置
 
@@ -199,7 +212,7 @@ AI_MAX_TOKENS=2000
 | GET | `/api/ai-insights/recurrence` | 获取复发问题分析总览 |
 | GET | `/api/ai-insights/recurrence/{id}` | 获取单个问题的复发/同源分析 |
 
-AI 接口会先执行本地规则计算，再调用 OpenAI-compatible 大模型接口做解释和建议。返回数据会区分 `ruleAnalysis`、`aiAnalysis`、`finalView` 和 `fallback`，避免把确定性的规则指标与大模型解释混在一起。`overview/refresh` 会先返回 `aiStatus=pending` 的规则结果；`ai-analysis` 成功后变为 `applied`，失败时变为 `failed` 并返回 `aiFailure.code/message`，页面仍展示本地规则结果。
+AI 接口会先在当前登录账号可见的数据范围内执行本地规则计算，再调用 OpenAI-compatible 大模型接口做解释和建议。返回数据会区分 `ruleAnalysis`、`aiAnalysis`、`finalView` 和 `fallback`，避免把确定性的规则指标与大模型解释混在一起。`overview/refresh` 会先返回 `aiStatus=pending` 的规则结果；`ai-analysis` 成功后变为 `applied`，失败时变为 `failed` 并返回 `aiFailure.code/message`，页面仍展示本地规则结果。
 
 ## REST API
 
@@ -231,8 +244,8 @@ AI 接口会先执行本地规则计算，再调用 OpenAI-compatible 大模型�
 | DELETE | `/api/dictionaries/{id}` | 删除未被引用的字段选项 |
 | GET | `/api/dictionaries/{id}/usage` | 查询字段选项引用数量 |
 | GET | `/api/accounts` | 账号列表，管理员 |
-| POST | `/api/accounts` | 新增账号，管理员 |
-| PUT | `/api/accounts/{id}` | 编辑账号/重置密码，管理员 |
+| POST | `/api/accounts` | 新增账号，管理员；支持部门和数据范围 |
+| PUT | `/api/accounts/{id}` | 编辑账号/重置密码/部门/数据范围，管理员 |
 | PATCH | `/api/accounts/{id}/enabled` | 启用/停用账号，管理员 |
 | GET | `/api/auth/sso/config` | 获取企业 SSO 启用状态 |
 | POST | `/api/auth/sso/login` | 获取企业 SSO 登录跳转地址 |

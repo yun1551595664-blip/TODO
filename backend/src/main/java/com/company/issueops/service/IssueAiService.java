@@ -3,6 +3,7 @@ package com.company.issueops.service;
 import com.company.issueops.domain.Issue;
 import com.company.issueops.domain.IssueLog;
 import com.company.issueops.repository.IssueRepository;
+import com.company.issueops.service.AuthService.AuthUser;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -22,16 +23,23 @@ public class IssueAiService {
   private final IssueRepository issues;
   private final AiClient aiClient;
   private final ObjectMapper objectMapper;
+  private final DataScopeService dataScopeService;
 
   public Map<String, Object> analyze(Long issueId, String type) {
+    return analyze(null, issueId, type);
+  }
+
+  public Map<String, Object> analyze(AuthUser user, Long issueId, String type) {
     Issue issue = issues
       .findById(issueId)
       .filter(item -> !Boolean.TRUE.equals(item.getDeleted()))
+      .filter(item -> user == null || dataScopeService.canSee(user, item))
       .orElseThrow(() -> new NoSuchElementException("问题不存在：" + issueId));
     List<Issue> activeIssues = issues
       .findAll()
       .stream()
       .filter(item -> !Boolean.TRUE.equals(item.getDeleted()))
+      .filter(item -> user == null || dataScopeService.canSee(user, item))
       .toList();
 
     Map<String, Object> context = buildContext(issue, activeIssues);

@@ -3,6 +3,7 @@ package com.company.issueops.service;
 import com.company.issueops.domain.Issue;
 import com.company.issueops.domain.IssueLog;
 import com.company.issueops.repository.IssueRepository;
+import com.company.issueops.service.AuthService.AuthUser;
 import com.company.issueops.web.IssueRequest;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -41,10 +42,19 @@ public class AiActionService {
 
   private final IssueService issueService;
   private final IssueRepository issues;
+  private final DataScopeService dataScopeService;
   private final ConcurrentMap<String, PendingAction> pendingActions = new ConcurrentHashMap<>();
 
   @SuppressWarnings("unchecked")
   public Optional<Map<String, Object>> normalizePendingAction(Object rawAction) {
+    return normalizePendingAction(null, rawAction);
+  }
+
+  @SuppressWarnings("unchecked")
+  public Optional<Map<String, Object>> normalizePendingAction(
+    AuthUser user,
+    Object rawAction
+  ) {
     if (!(rawAction instanceof Map<?, ?> raw)) return Optional.empty();
     String actionType = text(raw.get("actionType"));
     if (!ACTION_TYPES.contains(actionType)) return Optional.empty();
@@ -54,8 +64,8 @@ public class AiActionService {
 
     Map<String, Object> normalizedPayload = switch (actionType) {
       case "CREATE_ISSUE" -> normalizeCreatePayload((Map<String, Object>) payload);
-      case "UPDATE_STATUS" -> normalizeStatusPayload((Map<String, Object>) payload);
-      case "ADD_LOG" -> normalizeLogPayload((Map<String, Object>) payload);
+      case "UPDATE_STATUS" -> normalizeStatusPayload(user, (Map<String, Object>) payload);
+      case "ADD_LOG" -> normalizeLogPayload(user, (Map<String, Object>) payload);
       default -> Map.of();
     };
     if (normalizedPayload.isEmpty()) return Optional.empty();
@@ -72,6 +82,15 @@ public class AiActionService {
 
   @SuppressWarnings("unchecked")
   public Optional<Map<String, Object>> registerPendingAction(
+    Map<String, Object> normalizedAction,
+    String insightId
+  ) {
+    return registerPendingAction(null, normalizedAction, insightId);
+  }
+
+  @SuppressWarnings("unchecked")
+  public Optional<Map<String, Object>> registerPendingAction(
+    AuthUser user,
     Map<String, Object> normalizedAction,
     String insightId
   ) {
@@ -97,6 +116,7 @@ public class AiActionService {
       fallback(insightId, ""),
       actionType,
       new LinkedHashMap<>((Map<String, Object>) payload),
+      dataScopeService.scopeKey(user),
       now,
       now.plus(ACTION_TTL)
     );
@@ -110,6 +130,10 @@ public class AiActionService {
   }
 
   public Map<String, Object> execute(Map<String, Object> request) {
+    return execute(null, request);
+  }
+
+  public Map<String, Object> execute(AuthUser user, Map<String, Object> request) {
     cleanupExpired();
     String actionId = text(request.get("actionId"));
     if (actionId.isBlank()) {
@@ -123,11 +147,14 @@ public class AiActionService {
     if (pendingAction.expiresAt().isBefore(LocalDateTime.now())) {
       throw new IllegalArgumentException("待确认操作已过期，请重新生成");
     }
+    if (!Objects.equals(pendingAction.scopeKey(), dataScopeService.scopeKey(user))) {
+      throw new IllegalArgumentException("该待确认操作不属于当前账号或数据范围，请重新生成");
+    }
 
     return switch (pendingAction.actionType()) {
-      case "CREATE_ISSUE" -> executeCreate(pendingAction.payload());
-      case "UPDATE_STATUS" -> executeStatus(pendingAction.payload());
-      case "ADD_LOG" -> executeLog(pendingAction.payload());
+      case "CREATE_ISSUE" -> executeCreate(user, pendingAction.payload());
+      case "UPDATE_STATUS" -> executeStatus(user, pendingAction.payload());
+      case "ADD_LOG" -> executeLog(user, pendingAction.payload());
       default -> throw new IllegalArgumentException(
         "不支持的 AI 动作：" + pendingAction.actionType()
       );
@@ -171,8 +198,8 @@ public class AiActionService {
     return result;
   }
 
-  private Map<String, Object> normalizeStatusPayload(Map<String, Object> payload) {
-    Optional<Issue> issue = findIssue(payload);
+  private Map<String, Object> normalizeStatusPayload(AuthUser user, Map<String, Object> payload) {
+    Optional<Issue> issue = findIssue(user, payload);
     if (issue.isEmpty()) return Map.of();
     String status = normalizeStatus(text(payload.get("status")));
     return map(
@@ -191,8 +218,8 @@ public class AiActionService {
     );
   }
 
-  private Map<String, Object> normalizeLogPayload(Map<String, Object> payload) {
-    Optional<Issue> issue = findIssue(payload);
+  private Map<String, Object> normalizeLogPayload(AuthUser user, Map<String, Object> payload) {
+    Optional<Issue> issue = findIssue(user, payload);
     if (issue.isEmpty()) return Map.of();
     String content = text(payload.get("content"));
     if (content.isBlank()) return Map.of();
@@ -212,7 +239,7 @@ public class AiActionService {
     );
   }
 
-  private Map<String, Object> executeCreate(Map<String, Object> payload) {
+  private Map<String, Object> executeCreate(AuthUser user, Map<String, Object> payload) {
     Map<String, Object> normalized = normalizeCreatePayload(payload);
     if (normalized.isEmpty()) throw new IllegalArgumentException(
       "新增问题缺少必要字段：标题、业务场景、问题类型、影响范围、责任部门"
@@ -240,16 +267,17 @@ public class AiActionService {
         null,
         null,
         null,
-        text(normalized.get("createdBy"))
+        user == null ? text(normalized.get("createdBy")) : user.displayName()
       )
     );
     return executed("CREATE_ISSUE", "已创建问题：" + issue.getIssueNo(), issue);
   }
 
-  private Map<String, Object> executeStatus(Map<String, Object> payload) {
-    Map<String, Object> normalized = normalizeStatusPayload(payload);
+  private Map<String, Object> executeStatus(AuthUser user, Map<String, Object> payload) {
+    Map<String, Object> normalized = normalizeStatusPayload(user, payload);
     if (normalized.isEmpty()) throw new NoSuchElementException("未找到要更新状态的问题");
     Issue issue = issueService.status(
+      user,
       number(normalized.get("issueId")),
       text(normalized.get("status")),
       text(normalized.get("operator")),
@@ -258,10 +286,10 @@ public class AiActionService {
     return executed("UPDATE_STATUS", "已更新状态：" + issue.getStatus(), issue);
   }
 
-  private Map<String, Object> executeLog(Map<String, Object> payload) {
-    Map<String, Object> normalized = normalizeLogPayload(payload);
+  private Map<String, Object> executeLog(AuthUser user, Map<String, Object> payload) {
+    Map<String, Object> normalized = normalizeLogPayload(user, payload);
     if (normalized.isEmpty()) throw new IllegalArgumentException("新增处理记录缺少问题或内容");
-    Issue issue = issueService.get(number(normalized.get("issueId")));
+    Issue issue = issueService.get(user, number(normalized.get("issueId")));
     IssueLog log = issueService.addLog(
       issue,
       text(normalized.get("actionType")),
@@ -284,14 +312,15 @@ public class AiActionService {
     );
   }
 
-  private Optional<Issue> findIssue(Map<String, Object> payload) {
+  private Optional<Issue> findIssue(AuthUser user, Map<String, Object> payload) {
     Long id = nullableNumber(payload.get("issueId"));
     if (id == null) id = nullableNumber(payload.get("id"));
     if (id != null) {
       Long finalId = id;
       return issues
         .findById(finalId)
-        .filter(issue -> !Boolean.TRUE.equals(issue.getDeleted()));
+        .filter(issue -> !Boolean.TRUE.equals(issue.getDeleted()))
+        .filter(issue -> user == null || canSee(user, issue));
     }
     String issueNo = fallback(text(payload.get("issueNo")), text(payload.get("issueId")));
     if (issueNo.isBlank()) return Optional.empty();
@@ -299,8 +328,18 @@ public class AiActionService {
       .findAll()
       .stream()
       .filter(issue -> !Boolean.TRUE.equals(issue.getDeleted()))
+      .filter(issue -> user == null || canSee(user, issue))
       .filter(issue -> Objects.equals(issueNo, issue.getIssueNo()))
       .findFirst();
+  }
+
+  private boolean canSee(AuthUser user, Issue issue) {
+    try {
+      issueService.get(user, issue.getId());
+      return true;
+    } catch (NoSuchElementException ignored) {
+      return false;
+    }
   }
 
   private Map<String, Object> executed(String actionType, String message, Issue issue) {
@@ -422,6 +461,7 @@ public class AiActionService {
     String insightId,
     String actionType,
     Map<String, Object> payload,
+    String scopeKey,
     LocalDateTime createdAt,
     LocalDateTime expiresAt
   ) {}

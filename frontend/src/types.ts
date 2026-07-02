@@ -86,6 +86,8 @@ export type AuthUser = {
   username: string;
   displayName: string;
   role: "ADMIN" | "PRODUCT" | "TECH" | "CS" | "VIEWER" | string;
+  department?: string;
+  dataScope?: AccountDataScope | string;
   permissions: string[];
 };
 
@@ -96,12 +98,15 @@ export type AuthSession = {
 };
 
 export type AccountRole = "ADMIN" | "PRODUCT" | "TECH" | "CS" | "VIEWER";
+export type AccountDataScope = "ALL" | "DEPARTMENT" | "OWN" | "ASSIGNED";
 
 export type Account = {
   id: number;
   username: string;
   displayName: string;
   role: AccountRole | string;
+  department?: string;
+  dataScope?: AccountDataScope | string;
   enabled: boolean;
   ssoSubject?: string;
   lastLoginAt?: string;
@@ -115,6 +120,8 @@ export type AccountPayload = {
   displayName: string;
   role: AccountRole | string;
   enabled?: boolean;
+  department?: string;
+  dataScope?: AccountDataScope | string;
   ssoSubject?: string;
 };
 

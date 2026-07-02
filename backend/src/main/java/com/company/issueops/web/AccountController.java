@@ -51,6 +51,8 @@ public class AccountController {
     @NotBlank(message = "显示名称不能为空") String displayName,
     @NotBlank(message = "角色不能为空") String role,
     Boolean enabled,
+    String department,
+    String dataScope,
     String ssoSubject
   ) {
     AccountMutation toMutation() {
@@ -60,6 +62,8 @@ public class AccountController {
         displayName,
         role,
         enabled,
+        department,
+        dataScope,
         ssoSubject
       );
     }

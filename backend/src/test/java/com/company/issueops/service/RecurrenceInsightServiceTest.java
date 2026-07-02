@@ -27,7 +27,12 @@ class RecurrenceInsightServiceTest {
   private RecurrenceInsightService service;
 
   private RecurrenceInsightService service() {
-    return new RecurrenceInsightService(issues, aiClient, new ObjectMapper());
+    return new RecurrenceInsightService(
+      issues,
+      aiClient,
+      new ObjectMapper(),
+      new DataScopeService()
+    );
   }
 
   /** 校验层必须：剔除指向不存在 issueNo 的关联、捕获证据里夹带的伪造编号、并据此强制转人工。 */

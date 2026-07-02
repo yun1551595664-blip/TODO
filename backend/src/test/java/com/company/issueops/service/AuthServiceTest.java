@@ -47,7 +47,12 @@ class AuthServiceTest {
     });
 
     service =
-      new AuthService(new ObjectMapper(), accounts, new PasswordHashService());
+      new AuthService(
+        new ObjectMapper(),
+        accounts,
+        new PasswordHashService(),
+        new DataScopeService()
+      );
     ReflectionTestUtils.setField(service, "secret", "unit-test-secret");
     ReflectionTestUtils.setField(service, "tokenTtlSeconds", 3600L);
     ReflectionTestUtils.setField(
@@ -67,6 +72,7 @@ class AuthServiceTest {
 
     assertThat(session.token()).contains(".");
     assertThat(session.user().displayName()).isEqualTo("照远");
+    assertThat(session.user().dataScope()).isEqualTo("ALL");
     assertThat(
       service.authenticate("Bearer " + session.token()).orElseThrow().role()
     ).isEqualTo("ADMIN");
@@ -111,11 +117,15 @@ class AuthServiceTest {
         "运营负责人",
         "PRODUCT",
         true,
+        "产品部",
+        "ALL",
         null
       )
     );
 
     assertThat(account.username()).isEqualTo("ops");
+    assertThat(account.department()).isEqualTo("产品部");
+    assertThat(account.dataScope()).isEqualTo("ALL");
     assertThat(store.get("ops").getPasswordHash()).startsWith("pbkdf2$");
     assertThat(service.login("ops", "ops123456").user().role()).isEqualTo("PRODUCT");
   }

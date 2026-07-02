@@ -30,7 +30,7 @@ class AiActionServiceTest {
 
   @BeforeEach
   void setUp() {
-    service = new AiActionService(issueService, issues);
+    service = new AiActionService(issueService, issues, new DataScopeService());
   }
 
   @Test
@@ -55,7 +55,7 @@ class AiActionServiceTest {
     Issue issue = issue(1L, "PBI-20260601-0001", "处理中");
     Issue updated = issue(1L, "PBI-20260601-0001", "待验证");
     when(issues.findById(1L)).thenReturn(Optional.of(issue));
-    when(issueService.status(eq(1L), eq("待验证"), eq("AI 助理"), any()))
+    when(issueService.status(eq(null), eq(1L), eq("待验证"), eq("AI 助理"), any()))
       .thenReturn(updated);
 
     Map<String, Object> normalized = service
@@ -77,7 +77,7 @@ class AiActionServiceTest {
 
     assertThat(result.get("executed")).isEqualTo(true);
     assertThat(result.get("actionType")).isEqualTo("UPDATE_STATUS");
-    verify(issueService).status(eq(1L), eq("待验证"), eq("AI 助理"), any());
+    verify(issueService).status(eq(null), eq(1L), eq("待验证"), eq("AI 助理"), any());
     assertThatThrownBy(() -> service.execute(Map.of("actionId", actionId)))
       .isInstanceOf(IllegalArgumentException.class)
       .hasMessageContaining("不存在或已过期");

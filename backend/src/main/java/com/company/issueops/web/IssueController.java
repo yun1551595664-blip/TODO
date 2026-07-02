@@ -45,10 +45,13 @@ public class IssueController {
   ApiResponse<Page<Issue>> list(
     @RequestParam Map<String, String> q,
     @RequestParam(defaultValue = "0") int page,
-    @RequestParam(defaultValue = "10") int size
+    @RequestParam(defaultValue = "10") int size,
+    HttpServletRequest request
   ) {
+    AuthUser user = currentUser(request);
     return ApiResponse.ok(
       service.list(
+        user,
         q,
         PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))
       )
@@ -56,13 +59,13 @@ public class IssueController {
   }
 
   @GetMapping("/issues/{id}")
-  ApiResponse<Issue> get(@PathVariable Long id) {
-    return ApiResponse.ok(service.get(id));
+  ApiResponse<Issue> get(@PathVariable Long id, HttpServletRequest request) {
+    return ApiResponse.ok(service.get(currentUser(request), id));
   }
 
   @GetMapping("/issues/{id}/audits")
-  ApiResponse<List<AuditLog>> audits(@PathVariable Long id) {
-    service.get(id);
+  ApiResponse<List<AuditLog>> audits(@PathVariable Long id, HttpServletRequest request) {
+    service.get(currentUser(request), id);
     return ApiResponse.ok(auditLogService.listIssueAudits(id));
   }
 
@@ -94,8 +97,8 @@ public class IssueController {
     HttpServletRequest request
   ) {
     AuthUser user = currentUser(request);
-    Map<String, Object> before = auditLogService.issueSnapshot(service.get(id));
-    Issue result = service.update(id, requestBody);
+    Map<String, Object> before = auditLogService.issueSnapshot(service.get(user, id));
+    Issue result = service.update(user, id, requestBody);
     auditLogService.recordIssueSnapshotChange(
       user,
       "UPDATE_ISSUE",
@@ -112,8 +115,8 @@ public class IssueController {
   @Transactional
   ApiResponse<Void> delete(@PathVariable Long id, HttpServletRequest request) {
     AuthUser user = currentUser(request);
-    Map<String, Object> before = auditLogService.issueSnapshot(service.get(id));
-    service.delete(id);
+    Map<String, Object> before = auditLogService.issueSnapshot(service.get(user, id));
+    service.delete(user, id);
     auditLogService.recordIssueSnapshotChange(
       user,
       "DELETE_ISSUE",
@@ -134,8 +137,9 @@ public class IssueController {
     HttpServletRequest request
   ) {
     AuthUser user = currentUser(request);
-    Map<String, Object> before = auditLogService.issueSnapshot(service.get(id));
+    Map<String, Object> before = auditLogService.issueSnapshot(service.get(user, id));
     Issue result = service.status(
+      user,
       id,
       body.get("status"),
       operatorName(user),
@@ -162,8 +166,9 @@ public class IssueController {
   ) {
     AuthUser user = currentUser(request);
     boolean reopened = Boolean.TRUE.equals(body.get("reopened"));
-    Map<String, Object> before = auditLogService.issueSnapshot(service.get(id));
+    Map<String, Object> before = auditLogService.issueSnapshot(service.get(user, id));
     Issue result = service.reopened(
+      user,
       id,
       reopened,
       Objects.toString(body.get("reason"), null),
@@ -189,7 +194,7 @@ public class IssueController {
     HttpServletRequest request
   ) {
     AuthUser user = currentUser(request);
-    Issue issue = service.get(id);
+    Issue issue = service.get(user, id);
     IssueLog result = service.addLog(
       issue,
       body.getOrDefault("actionType", "处理记录"),
@@ -201,40 +206,43 @@ public class IssueController {
   }
 
   @GetMapping("/dashboard/statistics")
-  ApiResponse<Map<String, Object>> dashboard() {
-    return ApiResponse.ok(service.dashboardStatistics());
+  ApiResponse<Map<String, Object>> dashboard(HttpServletRequest request) {
+    return ApiResponse.ok(service.dashboardStatistics(currentUser(request)));
   }
 
   @GetMapping("/dashboard/trend")
   ApiResponse<List<Map<String, Object>>> dashboardTrend(
-    @RequestParam(defaultValue = "8w") String range
+    @RequestParam(defaultValue = "8w") String range,
+    HttpServletRequest request
   ) {
-    return ApiResponse.ok(service.dashboardTrend(range));
+    return ApiResponse.ok(service.dashboardTrend(currentUser(request), range));
   }
 
   @GetMapping("/dashboard/ai-insight")
-  ApiResponse<Map<String, Object>> dashboardAiInsight() {
-    return ApiResponse.ok(service.dashboardAiInsight());
+  ApiResponse<Map<String, Object>> dashboardAiInsight(HttpServletRequest request) {
+    return ApiResponse.ok(service.dashboardAiInsight(currentUser(request)));
   }
 
   @PostMapping("/dashboard/ai-insight/query")
   ApiResponse<Map<String, Object>> dashboardAiInsightQuery(
-    @RequestBody Map<String, String> body
+    @RequestBody Map<String, String> body,
+    HttpServletRequest request
   ) {
-    return ApiResponse.ok(service.dashboardAiQuery(body.get("question")));
+    return ApiResponse.ok(service.dashboardAiQuery(currentUser(request), body.get("question")));
   }
 
   @GetMapping({ "/reports/overview", "/retrospective" })
-  ApiResponse<Map<String, Object>> report() {
-    return ApiResponse.ok(service.report());
+  ApiResponse<Map<String, Object>> report(HttpServletRequest request) {
+    return ApiResponse.ok(service.report(currentUser(request)));
   }
 
   @PostMapping("/issues/{id}/ai/{type}")
   ApiResponse<Map<String, Object>> ai(
     @PathVariable Long id,
-    @PathVariable String type
+    @PathVariable String type,
+    HttpServletRequest request
   ) {
-    return ApiResponse.ok(issueAiService.analyze(id, type));
+    return ApiResponse.ok(issueAiService.analyze(currentUser(request), id, type));
   }
 
   private AuthUser currentUser(HttpServletRequest request) {

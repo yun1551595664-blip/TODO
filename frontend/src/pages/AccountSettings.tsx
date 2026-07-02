@@ -20,7 +20,12 @@ import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { useEffect, useMemo, useState } from "react";
 import { issueApi } from "../api";
-import type { Account, AccountPayload, AccountRole } from "../types";
+import type {
+  Account,
+  AccountDataScope,
+  AccountPayload,
+  AccountRole,
+} from "../types";
 
 const roleOptions: { value: AccountRole; label: string; color: string }[] = [
   { value: "ADMIN", label: "管理员", color: "purple" },
@@ -28,6 +33,17 @@ const roleOptions: { value: AccountRole; label: string; color: string }[] = [
   { value: "TECH", label: "技术", color: "cyan" },
   { value: "CS", label: "客服", color: "orange" },
   { value: "VIEWER", label: "观察员", color: "default" },
+];
+
+const dataScopeOptions: {
+  value: AccountDataScope;
+  label: string;
+  description: string;
+}[] = [
+  { value: "ALL", label: "全部数据", description: "可查看全公司问题数据" },
+  { value: "DEPARTMENT", label: "本部门", description: "责任部门或本人相关问题" },
+  { value: "OWN", label: "我创建的", description: "仅查看本人创建的问题" },
+  { value: "ASSIGNED", label: "指派给我", description: "仅查看责任人为本人的问题" },
 ];
 
 type FormValues = AccountPayload;
@@ -58,7 +74,7 @@ export default function AccountSettings() {
   const openCreate = () => {
     setEditing(undefined);
     form.resetFields();
-    form.setFieldsValue({ role: "VIEWER", enabled: true });
+    form.setFieldsValue({ role: "VIEWER", dataScope: "DEPARTMENT", enabled: true });
     setModalOpen(true);
   };
 
@@ -69,6 +85,8 @@ export default function AccountSettings() {
       username: account.username,
       displayName: account.displayName,
       role: account.role,
+      department: account.department,
+      dataScope: account.dataScope,
       enabled: account.enabled,
       ssoSubject: account.ssoSubject,
     });
@@ -129,6 +147,21 @@ export default function AccountSettings() {
         render: (value) => {
           const role = roleOptions.find((item) => item.value === value);
           return <Tag color={role?.color}>{role?.label || value}</Tag>;
+        },
+      },
+      {
+        title: "部门",
+        dataIndex: "department",
+        width: 140,
+        render: (value) => value || <span className="muted">未配置</span>,
+      },
+      {
+        title: "数据范围",
+        dataIndex: "dataScope",
+        width: 130,
+        render: (value) => {
+          const scope = dataScopeOptions.find((item) => item.value === value);
+          return <Tag color={value === "ALL" ? "purple" : "geekblue"}>{scope?.label || value}</Tag>;
         },
       },
       {
@@ -193,7 +226,7 @@ export default function AccountSettings() {
       <div className="settings-surface account-settings-surface">
         <div className="account-security-note">
           <SafetyCertificateOutlined />
-          <span>密码使用 PBKDF2 哈希保存；停用账号会立即失去登录和接口访问能力。</span>
+          <span>密码使用 PBKDF2 哈希保存；数据范围由后端统一过滤，停用账号会立即失去登录和接口访问能力。</span>
         </div>
         <Table
           rowKey="id"
@@ -216,7 +249,7 @@ export default function AccountSettings() {
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ role: "VIEWER", enabled: true }}
+          initialValues={{ role: "VIEWER", dataScope: "DEPARTMENT", enabled: true }}
           onFinish={submit}
         >
           <Form.Item
@@ -251,6 +284,25 @@ export default function AccountSettings() {
             rules={[{ required: true, message: "请选择角色" }]}
           >
             <Select options={roleOptions.map(({ value, label }) => ({ value, label }))} />
+          </Form.Item>
+          <Form.Item
+            name="department"
+            label="所属部门"
+            rules={[{ required: true, message: "请输入所属部门" }]}
+          >
+            <Input placeholder="例如：产品部、技术部、客服部" />
+          </Form.Item>
+          <Form.Item
+            name="dataScope"
+            label="数据范围"
+            rules={[{ required: true, message: "请选择数据范围" }]}
+          >
+            <Select
+              options={dataScopeOptions.map(({ value, label, description }) => ({
+                value,
+                label: `${label} · ${description}`,
+              }))}
+            />
           </Form.Item>
           <Form.Item name="ssoSubject" label="SSO 绑定标识">
             <Input placeholder="可选，例如企业身份唯一 ID" />

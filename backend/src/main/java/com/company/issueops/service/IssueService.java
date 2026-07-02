@@ -2,6 +2,7 @@ package com.company.issueops.service;
 
 import com.company.issueops.domain.*;
 import com.company.issueops.repository.*;
+import com.company.issueops.service.AuthService.AuthUser;
 import com.company.issueops.web.IssueRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.criteria.Predicate;
@@ -36,6 +37,7 @@ public class IssueService {
   private final AiClient aiClient;
   private final ObjectMapper objectMapper;
   private final ApplicationEventPublisher events;
+  private final DataScopeService dataScopeService;
 
   private LocalDate today() {
     return LocalDate.now(BUSINESS_ZONE);
@@ -54,9 +56,14 @@ public class IssueService {
   }
 
   public Page<Issue> list(Map<String, String> q, Pageable page) {
+    return list(null, q, page);
+  }
+
+  public Page<Issue> list(AuthUser user, Map<String, String> q, Pageable page) {
     Specification<Issue> spec = (root, cq, cb) -> {
       List<Predicate> p = new ArrayList<>();
-      p.add(cb.isFalse(root.get("deleted")));
+      p.add(activePredicate(root, cb));
+      if (user != null) p.add(dataScopeService.visibleIssuePredicate(user, root, cb));
       String kw = q.get("keyword");
       if (kw != null && !kw.isBlank()) p.add(
         cb.or(
@@ -118,9 +125,14 @@ public class IssueService {
   }
 
   public Issue get(Long id) {
+    return get(null, id);
+  }
+
+  public Issue get(AuthUser user, Long id) {
     return issues
       .findById(id)
-      .filter(i -> !i.getDeleted())
+      .filter(this::isActive)
+      .filter(i -> user == null || dataScopeService.canSee(user, i))
       .orElseThrow(() -> new NoSuchElementException("问题不存在"));
   }
 
@@ -138,7 +150,12 @@ public class IssueService {
 
   @Transactional
   public Issue update(Long id, IssueRequest r) {
-    Issue i = get(id);
+    return update(null, id, r);
+  }
+
+  @Transactional
+  public Issue update(AuthUser user, Long id, IssueRequest r) {
+    Issue i = get(user, id);
     String createdBy = i.getCreatedBy();
     copy(r, i);
     i.setCreatedBy(createdBy);
@@ -149,7 +166,12 @@ public class IssueService {
 
   @Transactional
   public void delete(Long id) {
-    Issue i = get(id);
+    delete(null, id);
+  }
+
+  @Transactional
+  public void delete(AuthUser user, Long id) {
+    Issue i = get(user, id);
     i.setDeleted(true);
     issues.save(i);
     publishIssueChanged(i);
@@ -157,10 +179,21 @@ public class IssueService {
 
   @Transactional
   public Issue status(Long id, String status, String operator, String content) {
+    return status(null, id, status, operator, content);
+  }
+
+  @Transactional
+  public Issue status(
+    AuthUser user,
+    Long id,
+    String status,
+    String operator,
+    String content
+  ) {
     if (!WORKFLOW_STATUSES.contains(status)) throw new IllegalArgumentException(
       "无效状态，请使用：" + String.join("、", WORKFLOW_STATUSES)
     );
-    Issue i = get(id);
+    Issue i = get(user, id);
     String old = i.getStatus();
     validateStatusTransition(old, status);
     i.setStatus(status);
@@ -187,7 +220,18 @@ public class IssueService {
     String reason,
     String operator
   ) {
-    Issue issue = get(id);
+    return reopened(null, id, reopened, reason, operator);
+  }
+
+  @Transactional
+  public Issue reopened(
+    AuthUser user,
+    Long id,
+    boolean reopened,
+    String reason,
+    String operator
+  ) {
+    Issue issue = get(user, id);
     issue.setReopened(reopened);
     issue.setReopenedReason(reopened ? reason : null);
     if (reopened && "已完成".equals(issue.getStatus())) {
@@ -230,11 +274,11 @@ public class IssueService {
   }
 
   public Map<String, Object> dashboardStatistics() {
-    List<Issue> all = issues
-      .findAll()
-      .stream()
-      .filter(this::isActive)
-      .toList();
+    return dashboardStatistics(null);
+  }
+
+  public Map<String, Object> dashboardStatistics(AuthUser user) {
+    List<Issue> all = visibleIssues(user);
     LocalDateTime month = today().withDayOfMonth(1).atStartOfDay();
     Map<String, Long> status = all
       .stream()
@@ -282,20 +326,20 @@ public class IssueService {
   }
 
   public List<Map<String, Object>> dashboardTrend(String range) {
-    List<Issue> all = issues
-      .findAll()
-      .stream()
-      .filter(this::isActive)
-      .toList();
+    return dashboardTrend(null, range);
+  }
+
+  public List<Map<String, Object>> dashboardTrend(AuthUser user, String range) {
+    List<Issue> all = visibleIssues(user);
     return buildTrend(all, range);
   }
 
   public Map<String, Object> dashboardAiInsight() {
-    List<Issue> all = issues
-      .findAll()
-      .stream()
-      .filter(this::isActive)
-      .toList();
+    return dashboardAiInsight(null);
+  }
+
+  public Map<String, Object> dashboardAiInsight(AuthUser user) {
+    List<Issue> all = visibleIssues(user);
     LocalDateTime recentStart = today().minusDays(30).atStartOfDay();
     List<Issue> recent = all
       .stream()
@@ -410,7 +454,11 @@ public class IssueService {
   }
 
   public Map<String, Object> dashboardAiQuery(String question) {
-    Map<String, Object> insight = dashboardAiInsight();
+    return dashboardAiQuery(null, question);
+  }
+
+  public Map<String, Object> dashboardAiQuery(AuthUser user, String question) {
+    Map<String, Object> insight = dashboardAiInsight(user);
     @SuppressWarnings("unchecked")
     List<Map<String, Object>> clusters = (List<Map<String, Object>>) insight.get(
       "rootClusters"
@@ -524,11 +572,11 @@ public class IssueService {
   }
 
   public Map<String, Object> report() {
-    List<Issue> all = issues
-      .findAll()
-      .stream()
-      .filter(this::isActive)
-      .toList();
+    return report(null);
+  }
+
+  public Map<String, Object> report(AuthUser user) {
+    List<Issue> all = visibleIssues(user);
     List<Map<String, Object>> types = all
       .stream()
       .collect(
@@ -617,10 +665,7 @@ public class IssueService {
       )
       .average()
       .orElse(0);
-    List<Issue> overdueIssues = list(
-      Map.of("overdue", "true"),
-      PageRequest.of(0, 10)
-    ).getContent();
+    List<Issue> overdueIssues = all.stream().filter(this::isOverdue).limit(10).toList();
     String topType = types.isEmpty()
       ? "高频问题"
       : String.valueOf(types.getFirst().get("name"));
@@ -694,6 +739,18 @@ public class IssueService {
 
   private boolean isActive(Issue issue) {
     return !Boolean.TRUE.equals(issue.getDeleted());
+  }
+
+  private List<Issue> visibleIssues(AuthUser user) {
+    List<Issue> all = issues.findAll().stream().filter(this::isActive).toList();
+    return user == null ? all : dataScopeService.filterVisible(user, all);
+  }
+
+  private Predicate activePredicate(
+    jakarta.persistence.criteria.Root<Issue> root,
+    jakarta.persistence.criteria.CriteriaBuilder cb
+  ) {
+    return cb.or(cb.isNull(root.get("deleted")), cb.isFalse(root.get("deleted")));
   }
 
   private String safeStatus(Issue issue) {
