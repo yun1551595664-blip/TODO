@@ -75,7 +75,7 @@ export default function IssueDetail() {
       } catch (error) {
         setAudits([]);
         message.warning(
-          error instanceof Error ? error.message : "操作留痕加载失败",
+          error instanceof Error ? error.message : "操作日志加载失败",
         );
       }
     } catch (error) {
@@ -251,7 +251,7 @@ export default function IssueDetail() {
           </section>
           <Divider />
           <section>
-            <h3>操作留痕</h3>
+            <h3>操作日志</h3>
             {audits.length ? (
               <Timeline
                 className="audit-timeline"
@@ -278,7 +278,7 @@ export default function IssueDetail() {
             ) : (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description="暂无操作留痕"
+                description="暂无操作日志"
               />
             )}
           </section>
