@@ -1,4 +1,6 @@
 SET NAMES utf8mb4;
+-- Docker demo bootstrap only. The complete schema source of truth is backend/src/main/resources/db/migration.
+-- For manual setup, let the backend run Flyway migrations first, then use this script for demo data.
 CREATE DATABASE IF NOT EXISTS issue_ops DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE issue_ops;
 CREATE TABLE IF NOT EXISTS issue (id BIGINT PRIMARY KEY AUTO_INCREMENT,issue_no VARCHAR(40) NOT NULL UNIQUE,title VARCHAR(255) NOT NULL,description TEXT,source VARCHAR(50),business_scene VARCHAR(100),issue_type VARCHAR(50),impact_scope VARCHAR(100),customer_impact TEXT,reproduce_steps TEXT,priority VARCHAR(10),status VARCHAR(30),responsible_department VARCHAR(60),responsible_person VARCHAR(60),tapd_url VARCHAR(500),attachment_url VARCHAR(500),root_cause TEXT,fix_solution TEXT,verify_result TEXT,is_reopened TINYINT(1) DEFAULT 0,reopened_reason TEXT,expected_finish_time DATETIME,actual_finish_time DATETIME,created_by VARCHAR(60),created_at DATETIME DEFAULT CURRENT_TIMESTAMP,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,deleted TINYINT(1) DEFAULT 0,INDEX idx_status(status),INDEX idx_department(responsible_department),INDEX idx_expected(expected_finish_time));

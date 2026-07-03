@@ -30,6 +30,7 @@ export default function App() {
           <Route path="issues/:id" element={<IssueDetail />} />
           <Route path="ai-insights" element={<AiInsightPage />} />
           <Route path="data" element={<DataReport />} />
+          <Route path="data/analysis" element={<DataReport />} />
           <Route path="retrospective" element={<RetrospectivePage />} />
           <Route
             path="settings/fields"

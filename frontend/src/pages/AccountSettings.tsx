@@ -211,7 +211,7 @@ export default function AccountSettings() {
       <div className="list-heading">
         <div>
           <h1>账号管理</h1>
-          <p>维护内部账号、角色权限、启停状态和企业 SSO 绑定标识</p>
+          <p>维护内部账号、角色权限、部门、数据范围、启停状态和企业 SSO 绑定标识</p>
         </div>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={load}>

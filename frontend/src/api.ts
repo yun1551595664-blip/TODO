@@ -20,6 +20,7 @@ import type {
   IssueAiAnalysis,
   PageData,
   RecurrenceInsight,
+  ReportAnalysisData,
   ReportData,
   RetrospectiveDraft,
   RetrospectiveAiSuggestion,
@@ -303,6 +304,11 @@ export const issueApi = {
   report: () =>
     http
       .get<unknown, ApiResponse<ReportData>>("/reports/overview")
+      .then((response) => response.data),
+
+  reportAnalysis: () =>
+    http
+      .get<unknown, ApiResponse<ReportAnalysisData>>("/reports/analysis")
       .then((response) => response.data),
 
   retrospectiveOverview: () =>

@@ -396,6 +396,78 @@ export type ReportData = {
   suggestions: OptimizationSuggestion[];
 };
 
+export type ReportSubScore = {
+  label: string;
+  value: number;
+  delta: string;
+};
+
+export type ReportAnalysisSummary = {
+  total: number;
+  current: number;
+  overdue: number;
+  reopened: number;
+  highPriority: number;
+  completed: number;
+  slaRate: number;
+  overdueRate: number;
+  reopenedRate: number;
+  averageHandleHours: number;
+  governanceScore: number;
+  subScores: ReportSubScore[];
+};
+
+export type ReportDimensionItem = {
+  key: string;
+  name: string;
+  value: number;
+  share: number;
+  overdueCount: number;
+  overdueRate: number;
+  reopenedCount: number;
+  reopenedRate: number;
+  averageHandleHours: number;
+  riskLevel: "高" | "中" | "低" | string;
+};
+
+export type ReportDimension = {
+  key: "businessScene" | "issueType" | "responsibleDepartment" | "source" | "impactScope" | string;
+  label: string;
+  items: ReportDimensionItem[];
+};
+
+export type ReportAnalysisTrendPoint = {
+  date: string;
+  newIssues: number;
+  completed: number;
+  pending: number;
+  overdue: number;
+};
+
+export type ReportEfficiencyBucket = {
+  label: string;
+  total: number;
+  highPriority: number;
+  normal: number;
+};
+
+export type ReportKeyChange = {
+  title: string;
+  description: string;
+  tone: "primary" | "warning" | "positive" | "neutral" | string;
+};
+
+export type ReportAnalysisData = {
+  summary: ReportAnalysisSummary;
+  dimensions: ReportDimension[];
+  trend: ReportAnalysisTrendPoint[];
+  efficiencyBuckets: ReportEfficiencyBucket[];
+  keyChanges: ReportKeyChange[];
+  issues: Issue[];
+  metricDefinitions: string[];
+  updatedAt: string;
+};
+
 export type RetrospectivePipelineStep = {
   label: string;
   description: string;

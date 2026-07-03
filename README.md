@@ -12,7 +12,7 @@
 - 问题详情：文档式信息、原因/修复/验证、处理时间线、复发信息。
 - 状态流转：`待处理 → 处理中 → 待验证 → 已完成`；复发作为独立标记，每次变更自动写入处理记录。
 - 处理记录：详情页直接新增。
-- 数据报表：问题概况、高频问题分布、类型/部门分布、处理时长、风险问题和动态优化建议。
+- 数据模块：数据总览与可钻取数据分析，覆盖治理指数、趋势分解、结构剖面、效率剖面、维度树、问题明细和数据口径。
 - AI 能力：独立 AI 洞察页、SSE 流式追问、AI 生成待确认操作草稿、问题详情归因/建议/重复判断；未配置模型时使用本地规则兜底。
 - 登录与角色：内置内部账号登录，账号落库管理，密码 PBKDF2 哈希保存，支持禁用账号、字段配置、数据范围和 AI 草稿执行权限控制。
 - 操作日志：问题新增、编辑、删除、状态变更、复发标记、处理记录和 AI 确认执行动作均写入审计，并可在问题详情页查看。
@@ -24,7 +24,7 @@
 ```text
 frontend/            React + TypeScript + Vite + Ant Design + Axios
 backend/             Java 21 + Spring Boot + Spring Data JPA + Maven
-mysql/init.sql       Docker 演示库初始化与演示数据
+mysql/init.sql       Docker 演示库基础脚本；完整结构以 Flyway 迁移为准
 backend/src/main/resources/db/migration 后端 Flyway 迁移
 docker-compose.yml   MySQL、后端、Nginx 前端编排
 ```
@@ -35,7 +35,7 @@ docker-compose.yml   MySQL、后端、Nginx 前端编排
 
 ### 1. MySQL
 
-创建 `issue_ops` 数据库。后端启动时会通过 Flyway 自动校验/迁移表结构；如需导入演示数据，可执行：
+创建 `issue_ops` 数据库。后端启动时会通过 Flyway 自动校验/迁移表结构；完整 schema 以 `backend/src/main/resources/db/migration` 为准。`mysql/init.sql` 是 Docker 演示库基础脚本，不作为完整迁移源。手动导入演示数据时，请先让后端完成 Flyway 迁移，再执行：
 
 ```bash
 mysql -uroot -p < mysql/init.sql
@@ -70,7 +70,7 @@ npm run dev
 
 ### 默认登录账号
 
-系统启动时会把 `AUTH_USERS` 中的账号同步为数据库账号；之后可由管理员在左侧 `账号管理` 页面新增、编辑、停用账号、配置所属部门、配置数据范围或重置密码。默认账号仅用于本地开发和演示：
+系统启动时会读取 `AUTH_USERS`，并只创建数据库中不存在的种子账号；对于已经存在的账号，页面维护的显示名、角色、部门、数据范围和启停状态不会被重启覆盖，仅在密码哈希缺失或历史明文密码时补齐/加密。之后可由管理员在左侧 `账号管理` 页面新增、编辑、停用账号、配置所属部门、配置数据范围或重置密码。默认账号仅用于本地开发和演示：
 
 | 角色 | 账号 | 密码 | 权限 |
 | --- | --- | --- | --- |
@@ -88,7 +88,7 @@ AUTH_TOKEN_TTL_SECONDS=28800
 AUTH_USERS=admin|admin123|ADMIN|照远;product|product123|PRODUCT|产品负责人
 ```
 
-`AUTH_USERS` 默认格式为 `账号|密码|角色|显示名`，也支持扩展为 `账号|密码|角色|显示名|部门|数据范围`。多个账号用英文分号分隔。当前角色支持 `ADMIN`、`PRODUCT`、`TECH`、`CS`、`VIEWER`。这些账号只用于初始化和补齐，不会在数据库中明文保存密码。
+`AUTH_USERS` 默认格式为 `账号|密码|角色|显示名`，也支持扩展为 `账号|密码|角色|显示名|部门|数据范围`。多个账号用英文分号分隔。当前角色支持 `ADMIN`、`PRODUCT`、`TECH`、`CS`、`VIEWER`。这些账号只用于创建缺失账号和补齐异常密码哈希，不会在数据库中明文保存密码；已存在账号的角色、部门、数据范围请以账号管理页为准。
 
 ### 数据范围权限
 
@@ -232,6 +232,7 @@ AI 接口会先在当前登录账号可见的数据范围内执行本地规则�
 | GET | `/api/dashboard/ai-insight` | 兼容旧版首页 AI 洞察接口，新页面使用 `/api/ai-insights/*` |
 | POST | `/api/dashboard/ai-insight/query` | 兼容旧版首页 AI 提问接口 |
 | GET | `/api/reports/overview` | 数据报表 |
+| GET | `/api/reports/analysis` | 数据分析主界面，返回治理指数、维度树、趋势、效率分布、明细和数据口径 |
 | GET | `/api/retrospectives/overview` | 复盘沉淀总览 |
 | GET | `/api/retrospectives/ai-suggestion` | 复盘沉淀 AI 建议 |
 | POST | `/api/retrospectives/draft` | 基于问题生成复盘草稿 |
@@ -243,6 +244,8 @@ AI 接口会先在当前登录账号可见的数据范围内执行本地规则�
 | PATCH | `/api/dictionaries/{id}/enabled` | 启用/停用字段选项 |
 | DELETE | `/api/dictionaries/{id}` | 删除未被引用的字段选项 |
 | GET | `/api/dictionaries/{id}/usage` | 查询字段选项引用数量 |
+| POST | `/api/auth/login` | 账号密码登录 |
+| GET | `/api/auth/me` | 获取当前登录用户 |
 | GET | `/api/accounts` | 账号列表，管理员 |
 | POST | `/api/accounts` | 新增账号，管理员；支持部门和数据范围 |
 | PUT | `/api/accounts/{id}` | 编辑账号/重置密码/部门/数据范围，管理员 |
@@ -263,7 +266,7 @@ IMPACT_SCOPE    影响范围
 
 ## 后续建议
 
-1. 完成真实企业 SSO 回调、部门同步和字段级权限。
+1. 完成真实企业 SSO 回调、组织部门同步和字段级可见/编辑权限。
 2. 附件升级为对象存储上传，TAPD 增加双向同步与 Webhook。
 3. 增加通知订阅、SLA 分级规则、自动升级和定期复盘任务。
 4. 为核心前端流程补充 Playwright E2E，覆盖新增问题、状态流转、AI 草稿确认。

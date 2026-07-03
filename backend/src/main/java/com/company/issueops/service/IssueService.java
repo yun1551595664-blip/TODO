@@ -717,6 +717,353 @@ public class IssueService {
     return result;
   }
 
+  public Map<String, Object> reportAnalysis(AuthUser user) {
+    List<Issue> all = visibleIssues(user);
+    List<Issue> rankedIssues = all
+      .stream()
+      .sorted(
+        Comparator
+          .comparingInt(this::issueRiskScore)
+          .reversed()
+          .thenComparing(
+            issue -> Optional.ofNullable(issue.getCreatedAt()).orElse(LocalDateTime.MIN),
+            Comparator.reverseOrder()
+          )
+      )
+      .limit(200)
+      .toList();
+
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("summary", buildAnalysisSummary(all));
+    result.put(
+      "dimensions",
+      List.of(
+        buildDimension("businessScene", "业务场景", all, Issue::getBusinessScene),
+        buildDimension("issueType", "问题类型", all, Issue::getIssueType),
+        buildDimension(
+          "responsibleDepartment",
+          "责任部门",
+          all,
+          Issue::getResponsibleDepartment
+        ),
+        buildDimension("source", "问题来源", all, Issue::getSource),
+        buildDimension("impactScope", "影响范围", all, Issue::getImpactScope)
+      )
+    );
+    result.put("trend", buildAnalysisTrend(all));
+    result.put("efficiencyBuckets", buildEfficiencyBuckets(all));
+    result.put("keyChanges", buildKeyChanges(all));
+    result.put("issues", rankedIssues);
+    result.put(
+      "metricDefinitions",
+      List.of(
+        "超期率 = 已超过预计完成时间且未实际完成的问题 / 当前可见问题数",
+        "复发率 = 标记为复发的问题 / 当前可见问题数",
+        "SLA 达成率 = 1 - 超期问题数 / 当前可见问题数",
+        "平均处理时长 = 已完成问题从创建到实际完成的平均耗时"
+      )
+    );
+    result.put("updatedAt", nowWithOffset());
+    return result;
+  }
+
+  private Map<String, Object> buildAnalysisSummary(List<Issue> all) {
+    long total = all.size();
+    long overdue = all.stream().filter(this::isOverdue).count();
+    long reopened = all.stream().filter(i -> Boolean.TRUE.equals(i.getReopened())).count();
+    long highPriority = all.stream().filter(this::isHighPriorityOpen).count();
+    long completed = all.stream().filter(this::isCompleted).count();
+    double averageHours = averageHandleHours(all);
+    double overdueRate = ratio(overdue, total);
+    double reopenedRate = ratio(reopened, total);
+    double slaRate = total == 0 ? 100 : Math.max(0, 100 - overdueRate);
+    int closureScore = score(ratio(completed, total));
+    int overdueScore = score(100 - overdueRate);
+    int reopenedScore = score(100 - reopenedRate);
+    int responseScore = score(100 - ratio(highPriority, Math.max(1, total)));
+    int governanceScore = Math.round(
+      (closureScore * 0.28f) +
+      (overdueScore * 0.32f) +
+      (reopenedScore * 0.24f) +
+      (responseScore * 0.16f)
+    );
+
+    Map<String, Object> summary = new LinkedHashMap<>();
+    summary.put("total", total);
+    summary.put("current", total);
+    summary.put("overdue", overdue);
+    summary.put("reopened", reopened);
+    summary.put("highPriority", highPriority);
+    summary.put("completed", completed);
+    summary.put("slaRate", round1(slaRate));
+    summary.put("overdueRate", round1(overdueRate));
+    summary.put("reopenedRate", round1(reopenedRate));
+    summary.put("averageHandleHours", round1(averageHours));
+    summary.put("governanceScore", governanceScore);
+    summary.put(
+      "subScores",
+      List.of(
+        map("label", "闭环效率", "value", closureScore, "delta", deltaText(completed, "已完成")),
+        map("label", "超期控制", "value", overdueScore, "delta", overdue + " 个超期"),
+        map("label", "复发控制", "value", reopenedScore, "delta", reopened + " 个复发"),
+        map("label", "高优先级响应", "value", responseScore, "delta", highPriority + " 个 P0/P1")
+      )
+    );
+    return summary;
+  }
+
+  private Map<String, Object> buildDimension(
+    String key,
+    String label,
+    List<Issue> all,
+    Function<Issue, String> extractor
+  ) {
+    long total = all.size();
+    List<Map<String, Object>> items = all
+      .stream()
+      .collect(Collectors.groupingBy(issue -> value(extractor.apply(issue), "未分配")))
+      .entrySet()
+      .stream()
+      .map(entry -> buildDimensionItem(entry.getKey(), entry.getValue(), total))
+      .sorted((a, b) -> Long.compare((Long) b.get("value"), (Long) a.get("value")))
+      .limit(12)
+      .toList();
+    return map("key", key, "label", label, "items", items);
+  }
+
+  private Map<String, Object> buildDimensionItem(
+    String name,
+    List<Issue> group,
+    long total
+  ) {
+    long count = group.size();
+    long overdue = group.stream().filter(this::isOverdue).count();
+    long reopened = group.stream().filter(i -> Boolean.TRUE.equals(i.getReopened())).count();
+    long highPriority = group.stream().filter(this::isHighPriorityOpen).count();
+    return map(
+      "key",
+      name,
+      "name",
+      name,
+      "value",
+      count,
+      "share",
+      round1(ratio(count, total)),
+      "overdueCount",
+      overdue,
+      "overdueRate",
+      round1(ratio(overdue, count)),
+      "reopenedCount",
+      reopened,
+      "reopenedRate",
+      round1(ratio(reopened, count)),
+      "averageHandleHours",
+      round1(averageHandleHours(group)),
+      "riskLevel",
+      riskLevel(overdue, reopened, highPriority)
+    );
+  }
+
+  private List<Map<String, Object>> buildAnalysisTrend(List<Issue> all) {
+    LocalDate end = today();
+    LocalDate start = end.minusDays(29);
+    List<Map<String, Object>> trend = new ArrayList<>();
+    for (LocalDate date = start; !date.isAfter(end); date = date.plusDays(1)) {
+      LocalDate currentDate = date;
+      long created = all
+        .stream()
+        .filter(issue -> sameDate(issue.getCreatedAt(), currentDate))
+        .count();
+      long completed = all
+        .stream()
+        .filter(issue -> sameDate(issue.getActualFinishTime(), currentDate))
+        .count();
+      long pending = all.stream().filter(issue -> existedAndOpenOn(issue, currentDate)).count();
+      long overdue = all.stream().filter(issue -> overdueOn(issue, currentDate)).count();
+      trend.add(
+        map(
+          "date",
+          currentDate.toString(),
+          "newIssues",
+          created,
+          "completed",
+          completed,
+          "pending",
+          pending,
+          "overdue",
+          overdue
+        )
+      );
+    }
+    return trend;
+  }
+
+  private List<Map<String, Object>> buildEfficiencyBuckets(List<Issue> all) {
+    List<Issue> completed = all
+      .stream()
+      .filter(issue -> issue.getActualFinishTime() != null && issue.getCreatedAt() != null)
+      .toList();
+    return List.of(
+      buildEfficiencyBucket("0-1天", completed, 0, 24),
+      buildEfficiencyBucket("1-3天", completed, 24, 72),
+      buildEfficiencyBucket("3-7天", completed, 72, 168),
+      buildEfficiencyBucket("7天以上", completed, 168, Long.MAX_VALUE)
+    );
+  }
+
+  private Map<String, Object> buildEfficiencyBucket(
+    String label,
+    List<Issue> completed,
+    long minHours,
+    long maxHours
+  ) {
+    List<Issue> bucket = completed
+      .stream()
+      .filter(issue -> {
+        long hours = Duration.between(issue.getCreatedAt(), issue.getActualFinishTime()).toHours();
+        return hours >= minHours && hours < maxHours;
+      })
+      .toList();
+    long highPriority = bucket.stream().filter(this::isHighPriority).count();
+    return map(
+      "label",
+      label,
+      "total",
+      bucket.size(),
+      "highPriority",
+      highPriority,
+      "normal",
+      bucket.size() - highPriority
+    );
+  }
+
+  private List<Map<String, Object>> buildKeyChanges(List<Issue> all) {
+    String topType = topGroupName(all, Issue::getIssueType, "暂无类型数据");
+    String topDepartment = topGroupName(all, Issue::getResponsibleDepartment, "暂无部门数据");
+    long overdue = all.stream().filter(this::isOverdue).count();
+    long reopened = all.stream().filter(i -> Boolean.TRUE.equals(i.getReopened())).count();
+    return List.of(
+      map(
+        "title",
+        "问题结构集中",
+        "description",
+        "当前问题最多集中在「" + topType + "」，建议优先查看类型剖面。",
+        "tone",
+        "primary"
+      ),
+      map(
+        "title",
+        "责任负载集中",
+        "description",
+        "责任部门中「" + topDepartment + "」问题量最高，需要关注排期和协同压力。",
+        "tone",
+        "neutral"
+      ),
+      map(
+        "title",
+        overdue > 0 ? "超期风险存在" : "超期风险可控",
+        "description",
+        "当前可见范围内有 " + overdue + " 个超期问题、" + reopened + " 个复发问题。",
+        "tone",
+        overdue > 0 ? "warning" : "positive"
+      )
+    );
+  }
+
+  private int issueRiskScore(Issue issue) {
+    int score = 0;
+    if (isOverdue(issue)) score += 100;
+    if (Boolean.TRUE.equals(issue.getReopened())) score += 80;
+    if ("P0".equals(issue.getPriority())) score += 70;
+    else if ("P1".equals(issue.getPriority())) score += 50;
+    if (!isCompleted(issue)) score += 20;
+    return score;
+  }
+
+  private boolean isHighPriorityOpen(Issue issue) {
+    return isHighPriority(issue) && !isCompleted(issue);
+  }
+
+  private boolean isHighPriority(Issue issue) {
+    return "P0".equals(issue.getPriority()) || "P1".equals(issue.getPriority());
+  }
+
+  private boolean isCompleted(Issue issue) {
+    return "已完成".equals(issue.getStatus());
+  }
+
+  private boolean sameDate(LocalDateTime value, LocalDate date) {
+    return value != null && value.toLocalDate().equals(date);
+  }
+
+  private boolean existedAndOpenOn(Issue issue, LocalDate date) {
+    if (issue.getCreatedAt() == null || issue.getCreatedAt().toLocalDate().isAfter(date)) return false;
+    return issue.getActualFinishTime() == null || issue.getActualFinishTime().toLocalDate().isAfter(date);
+  }
+
+  private boolean overdueOn(Issue issue, LocalDate date) {
+    if (issue.getExpectedFinishTime() == null || !issue.getExpectedFinishTime().toLocalDate().isBefore(date)) return false;
+    return issue.getActualFinishTime() == null || issue.getActualFinishTime().toLocalDate().isAfter(date);
+  }
+
+  private double averageHandleHours(List<Issue> issueList) {
+    return issueList
+      .stream()
+      .filter(i -> i.getActualFinishTime() != null && i.getCreatedAt() != null)
+      .mapToLong(i -> Duration.between(i.getCreatedAt(), i.getActualFinishTime()).toHours())
+      .average()
+      .orElse(0);
+  }
+
+  private String topGroupName(
+    List<Issue> all,
+    Function<Issue, String> extractor,
+    String fallback
+  ) {
+    return all
+      .stream()
+      .collect(Collectors.groupingBy(issue -> value(extractor.apply(issue), fallback), Collectors.counting()))
+      .entrySet()
+      .stream()
+      .max(Map.Entry.comparingByValue())
+      .map(Map.Entry::getKey)
+      .orElse(fallback);
+  }
+
+  private String riskLevel(long overdue, long reopened, long highPriority) {
+    if (overdue > 0 || highPriority > 1) return "高";
+    if (reopened > 0 || highPriority > 0) return "中";
+    return "低";
+  }
+
+  private int score(double value) {
+    return (int) Math.max(0, Math.min(100, Math.round(value)));
+  }
+
+  private double ratio(long value, long total) {
+    return total == 0 ? 0 : (value * 100.0) / total;
+  }
+
+  private double round1(double value) {
+    return Math.round(value * 10) / 10.0;
+  }
+
+  private String deltaText(long value, String label) {
+    return value + " 个" + label;
+  }
+
+  private String value(String value, String fallback) {
+    return value == null || value.isBlank() ? fallback : value.trim();
+  }
+
+  private Map<String, Object> map(Object... values) {
+    Map<String, Object> result = new LinkedHashMap<>();
+    for (int i = 0; i < values.length - 1; i += 2) {
+      result.put(String.valueOf(values[i]), values[i + 1]);
+    }
+    return result;
+  }
+
   private String clusterName(Issue issue) {
     String title = Optional.ofNullable(issue.getTitle()).orElse("");
     for (String keyword : List.of(

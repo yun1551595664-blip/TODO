@@ -236,6 +236,11 @@ public class IssueController {
     return ApiResponse.ok(service.report(currentUser(request)));
   }
 
+  @GetMapping("/reports/analysis")
+  ApiResponse<Map<String, Object>> reportAnalysis(HttpServletRequest request) {
+    return ApiResponse.ok(service.reportAnalysis(currentUser(request)));
+  }
+
   @PostMapping("/issues/{id}/ai/{type}")
   ApiResponse<Map<String, Object>> ai(
     @PathVariable Long id,

@@ -129,4 +129,30 @@ class AuthServiceTest {
     assertThat(store.get("ops").getPasswordHash()).startsWith("pbkdf2$");
     assertThat(service.login("ops", "ops123456").user().role()).isEqualTo("PRODUCT");
   }
+
+  @Test
+  void configuredAccountsDoNotOverwriteExistingAdminEditsOnStartup() {
+    UserAccount admin = store.get("admin");
+    admin.setDisplayName("管理员已改名");
+    admin.setRole("TECH");
+    admin.setDepartment("技术支持");
+    admin.setDataScope("DEPARTMENT");
+
+    ReflectionTestUtils.setField(
+      service,
+      "usersConfig",
+      "admin|changed123456|ADMIN|照远|公司全局|ALL"
+    );
+    service.init();
+
+    assertThat(store.get("admin").getDisplayName()).isEqualTo("管理员已改名");
+    assertThat(store.get("admin").getRole()).isEqualTo("TECH");
+    assertThat(store.get("admin").getDepartment()).isEqualTo("技术支持");
+    assertThat(store.get("admin").getDataScope()).isEqualTo("DEPARTMENT");
+    assertThatThrownBy(() -> service.login("admin", "changed123456"))
+      .isInstanceOf(IllegalArgumentException.class)
+      .hasMessageContaining("账号或密码不正确");
+    assertThat(service.login("admin", "admin123456").user().displayName())
+      .isEqualTo("管理员已改名");
+  }
 }

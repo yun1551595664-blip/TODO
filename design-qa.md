@@ -1,48 +1,37 @@
-**Findings**
-- No actionable P0/P1/P2 issues remain for the selected Action Command Center direction.
+**Status**
+- Current as of 2026-07-03.
+- This file records the current product surface, not the older homepage-embedded AI module.
 
-**Source Visual Truth**
-- Source image: `C:\Users\Administrator\.codex\generated_images\019edde7-2d54-7d51-b38a-30a475885ea1\ig_01295418b492f8db016a3b8c42ddac8191a034332827ec5e3d.png`
-- Target state: AI insight module after a user asks a follow-up question.
+**Current Visual Truth**
+- Homepage `/`: overview metrics, trend, focus issues, and a lightweight `AI 智能洞察` entry card.
+- Data module `/data`: 数据总览，使用治理指数、关键变化、趋势分解、结构剖面和效率剖面。
+- Data module `/data/analysis`: 数据分析主界面，使用分析路径、维度树、筛选趋势、较全量差异、问题明细和数据口径。
+- Full AI workspace `/ai-insights`: Action Command Center layout with risk radar, suggested priority queue, AI analysis assistant, and bottom follow-up input.
+- Design system source: `frontend/DESIGN_SYSTEM.md`.
 
-**Implementation Evidence**
-- URL: `http://127.0.0.1:18000/`
-- Viewport tested in Browser runtime: 1280 x 720 responsive stack.
-- Intended wide layout: >= 1401px uses three columns matching the Action Command Center structure.
-- Screenshot path: unavailable. Browser screenshot capture timed out for this page during QA, so this pass uses live DOM metrics and interaction verification.
-- State verified:
-  - AI module renders `风险雷达`, `本次建议优先级`, `AI 回复`, and bottom follow-up input.
-  - Risk radar renders 3 cards.
-  - Default priority list renders top 3 issues.
-  - Click risk item filters the middle list. Verified `复发问题` filter reduced the list to 1 issue.
-  - Submitting `哪些问题可能复发？` updates the right AI reply area with `AI 回答`, evidence, and suggested actions.
-  - Clicking a priority issue navigates to `/issues/3`.
+**AI Insight Surface**
+- The homepage does not render the full `AiInsightCommandCenter`.
+- The full command center is the independent left-nav module `AI 洞察`.
+- Wide layout uses three columns: risk radar, priority list, and AI assistant.
+- AI assistant supports empty state, thinking state, SSE streaming answer, done state, error fallback, quick follow-up prompts, and server-side session history.
+- Risk card selection filters the middle priority list.
+- Clicking priority rows navigates to issue detail.
 
-**Required Fidelity Surfaces**
-- Fonts and typography: Uses existing Apple-style system font stack and compact SaaS hierarchy. Labels, issue titles, metadata, and reply sections have distinct weights and sizes.
-- Spacing and layout rhythm: Wide layout is a 220px radar column, flexible priority list, and 360px AI reply column. Narrow desktop stacks responsively to prevent overflow.
-- Colors and visual tokens: Uses the existing white surface, thin gray borders, low shadow, and restrained purple primary color. Warning/danger states are limited to amber/red signal surfaces.
-- Image quality and asset fidelity: No raster assets are required for this UI. Icons use Ant Design icon library, not handcrafted inline assets.
-- Copy and content: The module copy follows the selected direction: risk radar, suggested priority, AI explanatory reply, and follow-up input. AI text is data-driven from backend issue context with local-rule fallback.
+**Backend Contract**
+- `GET /api/ai-insights/overview`: returns local rule result immediately with `aiStatus=pending` when model analysis is still loading.
+- `GET /api/ai-insights/ai-analysis`: applies model explanation when available.
+- `POST /api/ai-insights/sessions`: creates a server-side AI session.
+- `POST /api/ai-insights/sessions/{sessionId}/chat/stream`: SSE stream for follow-up analysis.
+- `GET /api/reports/overview`: returns data overview metrics and report suggestions.
+- `GET /api/reports/analysis`: returns governance score, dimensions, trend, efficiency buckets, issue detail rows, and metric definitions for drill-down analysis.
+- AI responses must be based on the current user's visible issue data scope.
 
-**Patches Made Since QA Start**
-- Added backend `/api/ai-insights/overview`, `/api/ai-insights/refresh`, and `/api/ai-insights/chat`.
-- Added generic `AiClient` and OpenAI-compatible provider implementation using backend `AI_*` environment variables.
-- Added backend local-rule scoring before model explanation and JSON normalization after model response.
-- Replaced the homepage AI module with `AiInsightCommandCenter`.
-- Added risk-card filtering, priority-row navigation, AI follow-up input, loading, and fallback states.
-- Tightened the priority list to Top 3 to match the selected visual direction.
-- Added responsive stacking under 1400px to avoid overflow.
+**Known Validation Notes**
+- If `AI_API_KEY` is absent or the model call fails, the page must show local rule analysis and an explicit unavailable state. It must not pretend fallback text is model output.
+- Data scope is enforced by the backend; frontend filtering is only a display aid.
+- Docker production entry remains `http://localhost:18000`; Vite development entry remains `http://localhost:5173`.
 
-**Open Questions**
-- Real model output was not verified in the running container because `AI_API_KEY` is not configured there. The API path is implemented and falls back safely when the key is absent.
-
-**Implementation Checklist**
-- Configure `AI_API_KEY` in backend environment before production validation.
-- Re-run visual QA in a full 1920px browser window after the key is configured.
-- Consider adding persisted AI insight snapshots if the team needs audit history across backend restarts.
-
-**Follow-up Polish**
-- Tune exact row heights and icon weights against a real 1920px screenshot after the team approves the current information structure.
-
-final result: passed
+**Next QA Pass**
+- Re-run visual QA at 1920px after AI key configuration.
+- Verify streaming output height stays constrained inside the AI assistant panel.
+- Verify admin, product, tech, cs, and viewer accounts only see data allowed by their data scope.

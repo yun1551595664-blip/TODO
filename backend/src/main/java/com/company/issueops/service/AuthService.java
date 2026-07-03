@@ -211,24 +211,54 @@ public class AuthService {
       .map(String::trim)
       .filter(item -> !item.isBlank())
       .map(this::parseSeedAccount)
-      .forEach(seed -> {
-        UserAccount account = accounts
-          .findByUsername(seed.username())
-          .orElseGet(UserAccount::new);
-        boolean isNew = account.getId() == null;
-        account.setUsername(seed.username());
-        account.setDisplayName(seed.displayName());
-        account.setRole(seed.role());
-        account.setDepartment(seed.department());
-        account.setDataScope(seed.dataScope());
-        if (isNew || account.getPasswordHash() == null || account.getPasswordHash().isBlank()) {
-          account.setPasswordHash(passwordHashService.hash(seed.password()));
-        } else if (!passwordHashService.isHashed(account.getPasswordHash())) {
-          account.setPasswordHash(passwordHashService.hash(account.getPasswordHash()));
-        }
-        if (account.getEnabled() == null) account.setEnabled(true);
-        accounts.save(account);
-      });
+      .forEach(this::syncConfiguredAccount);
+  }
+
+  private void syncConfiguredAccount(SeedAccount seed) {
+    Optional<UserAccount> existing = accounts.findByUsername(seed.username());
+    if (existing.isEmpty()) {
+      UserAccount account = new UserAccount();
+      account.setUsername(seed.username());
+      account.setDisplayName(seed.displayName());
+      account.setRole(seed.role());
+      account.setDepartment(seed.department());
+      account.setDataScope(seed.dataScope());
+      account.setPasswordHash(passwordHashService.hash(seed.password()));
+      account.setEnabled(true);
+      accounts.save(account);
+      return;
+    }
+
+    UserAccount account = existing.get();
+    boolean changed = false;
+    if (account.getPasswordHash() == null || account.getPasswordHash().isBlank()) {
+      account.setPasswordHash(passwordHashService.hash(seed.password()));
+      changed = true;
+    } else if (!passwordHashService.isHashed(account.getPasswordHash())) {
+      account.setPasswordHash(passwordHashService.hash(account.getPasswordHash()));
+      changed = true;
+    }
+    if (account.getRole() == null || account.getRole().isBlank()) {
+      account.setRole(seed.role());
+      changed = true;
+    }
+    if (account.getDisplayName() == null || account.getDisplayName().isBlank()) {
+      account.setDisplayName(seed.displayName());
+      changed = true;
+    }
+    if (account.getDepartment() == null || account.getDepartment().isBlank()) {
+      account.setDepartment(seed.department());
+      changed = true;
+    }
+    if (account.getDataScope() == null || account.getDataScope().isBlank()) {
+      account.setDataScope(seed.dataScope());
+      changed = true;
+    }
+    if (account.getEnabled() == null) {
+      account.setEnabled(true);
+      changed = true;
+    }
+    if (changed) accounts.save(account);
   }
 
   private UserAccount getAccount(Long id) {
