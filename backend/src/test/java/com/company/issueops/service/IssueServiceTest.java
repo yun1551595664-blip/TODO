@@ -148,6 +148,107 @@ class IssueServiceTest {
   }
 
   @Test
+  @SuppressWarnings("unchecked")
+  void reportAnalysisReturnsPeriodAggregation() {
+    Issue overdue = issue(1L, "处理中");
+    overdue.setTitle("支付状态延迟");
+    overdue.setIssueType("系统缺陷");
+    overdue.setPriority("P1");
+    overdue.setCreatedAt(LocalDateTime.of(2026, 6, 3, 9, 0));
+    overdue.setExpectedFinishTime(LocalDateTime.of(2026, 6, 10, 18, 0));
+
+    Issue completed = issue(2L, "已完成");
+    completed.setTitle("报表字段缺失");
+    completed.setIssueType("报表问题");
+    completed.setPriority("P2");
+    completed.setCreatedAt(LocalDateTime.of(2026, 6, 5, 9, 0));
+    completed.setUpdatedAt(LocalDateTime.of(2026, 6, 8, 18, 0));
+    completed.setActualFinishTime(LocalDateTime.of(2026, 6, 8, 18, 0));
+
+    Issue carryOver = issue(3L, "已完成");
+    carryOver.setTitle("五月遗留问题");
+    carryOver.setIssueType("系统缺陷");
+    carryOver.setPriority("P0");
+    carryOver.setCreatedAt(LocalDateTime.of(2026, 5, 25, 9, 0));
+    carryOver.setUpdatedAt(LocalDateTime.of(2026, 6, 15, 18, 0));
+    carryOver.setActualFinishTime(LocalDateTime.of(2026, 6, 15, 18, 0));
+
+    Issue previous = issue(4L, "已完成");
+    previous.setTitle("上期问题");
+    previous.setIssueType("历史问题");
+    previous.setCreatedAt(LocalDateTime.of(2026, 5, 6, 9, 0));
+    previous.setUpdatedAt(LocalDateTime.of(2026, 5, 7, 18, 0));
+    previous.setActualFinishTime(LocalDateTime.of(2026, 5, 7, 18, 0));
+
+    when(issues.findAll()).thenReturn(List.of(overdue, completed, carryOver, previous));
+
+    Map<String, Object> result = service.reportAnalysis(
+      null,
+      "2026-06-01",
+      "2026-06-30"
+    );
+
+    Map<String, Object> period = (Map<String, Object>) result.get("period");
+    assertThat(period.get("label")).isEqualTo("2026-06-01 至 2026-06-30");
+    assertThat((List<?>) result.get("trend")).hasSize(30);
+    assertThat(result).containsKeys(
+      "periodSummary",
+      "structureMatrix",
+      "priorityEfficiency",
+      "datasets",
+      "events"
+    );
+
+    List<Map<String, Object>> periodSummary = (List<Map<String, Object>>) result.get(
+      "periodSummary"
+    );
+    assertThat(periodSummary.get(0).get("value")).isEqualTo(2L);
+    assertThat(periodSummary.get(1).get("value")).isEqualTo(2L);
+    assertThat(periodSummary.get(2).get("value")).isEqualTo(1L);
+    assertThat(periodSummary.get(3).get("value")).isEqualTo(1L);
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void reportAnalysisRecomputesAggregatesByDepartmentFilter() {
+    Issue tech = issue(1L, "处理中");
+    tech.setTitle("支付状态延迟");
+    tech.setIssueType("系统缺陷");
+    tech.setResponsibleDepartment("技术部");
+    tech.setCreatedAt(LocalDateTime.of(2026, 6, 3, 9, 0));
+    tech.setExpectedFinishTime(LocalDateTime.of(2026, 6, 5, 18, 0));
+
+    Issue product = issue(2L, "已完成");
+    product.setTitle("报表字段缺失");
+    product.setIssueType("报表问题");
+    product.setResponsibleDepartment("产品部");
+    product.setCreatedAt(LocalDateTime.of(2026, 6, 4, 9, 0));
+    product.setActualFinishTime(LocalDateTime.of(2026, 6, 6, 18, 0));
+
+    Issue unassigned = issue(3L, "待处理");
+    unassigned.setTitle("未分配问题");
+    unassigned.setCreatedAt(LocalDateTime.of(2026, 6, 7, 9, 0));
+
+    when(issues.findAll()).thenReturn(List.of(tech, product, unassigned));
+
+    Map<String, Object> result = service.reportAnalysis(
+      null,
+      "2026-06-01",
+      "2026-06-30",
+      "技术部"
+    );
+
+    Map<String, Object> summary = (Map<String, Object>) result.get("summary");
+    assertThat(summary.get("total")).isEqualTo(1L);
+    assertThat(summary.get("overdue")).isEqualTo(1L);
+    assertThat((List<String>) result.get("availableDepartments"))
+      .containsExactly("产品部", "技术部", "未分配");
+    assertThat((List<Issue>) result.get("issues"))
+      .extracting(Issue::getResponsibleDepartment)
+      .containsOnly("技术部");
+  }
+
+  @Test
   void rejectsRemovedSuspendedStatus() {
     assertThatThrownBy(() -> service.status(1L, "已挂起", "测试员", null))
       .isInstanceOf(IllegalArgumentException.class)

@@ -4,6 +4,7 @@ import com.company.issueops.common.ApiResponse;
 import com.company.issueops.service.AuthService;
 import com.company.issueops.service.AuthService.AuthSession;
 import com.company.issueops.service.AuthService.AuthUser;
+import com.company.issueops.service.AuthService.SsoCallbackRequest;
 import com.company.issueops.service.AuthService.SsoConfig;
 import com.company.issueops.service.AuthService.SsoLoginResponse;
 import jakarta.servlet.http.HttpServletRequest;
@@ -54,6 +55,23 @@ public class AuthController {
     } catch (IllegalStateException e) {
       response.setStatus(HttpServletResponse.SC_NOT_IMPLEMENTED);
       return new ApiResponse<>(501, e.getMessage(), null);
+    }
+  }
+
+  @PostMapping("/sso/callback")
+  ApiResponse<AuthSession> ssoCallback(
+    @RequestBody SsoCallbackRequest body,
+    @RequestHeader(value = "X-SSO-Token", required = false) String callbackToken,
+    HttpServletResponse response
+  ) {
+    try {
+      return ApiResponse.ok(authService.ssoCallback(body, callbackToken));
+    } catch (IllegalStateException e) {
+      response.setStatus(HttpServletResponse.SC_NOT_IMPLEMENTED);
+      return new ApiResponse<>(501, e.getMessage(), null);
+    } catch (IllegalArgumentException e) {
+      response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+      return new ApiResponse<>(401, e.getMessage(), null);
     }
   }
 }

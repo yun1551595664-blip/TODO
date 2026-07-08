@@ -7,7 +7,13 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface UserAccountRepository extends JpaRepository<UserAccount, Long> {
   Optional<UserAccount> findByUsername(String username);
 
+  Optional<UserAccount> findBySsoSubject(String ssoSubject);
+
   boolean existsByUsername(String username);
 
+  long countByRole(String role);
+
   long countByRoleAndEnabledTrue(String role);
+
+  long countByDepartment(String department);
 }

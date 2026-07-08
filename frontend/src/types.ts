@@ -97,8 +97,57 @@ export type AuthSession = {
   expiresAt: number;
 };
 
-export type AccountRole = "ADMIN" | "PRODUCT" | "TECH" | "CS" | "VIEWER";
+export type AccountRole = "ADMIN" | "PRODUCT" | "TECH" | "CS" | "VIEWER" | string;
 export type AccountDataScope = "ALL" | "DEPARTMENT" | "OWN" | "ASSIGNED";
+
+export type RoleConfig = {
+  id: number;
+  code: string;
+  name: string;
+  description?: string;
+  permissions: string[];
+  defaultDataScope: AccountDataScope | string;
+  defaultDepartment?: string;
+  enabled: boolean;
+  systemBuiltin: boolean;
+  sortOrder: number;
+  accountCount: number;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type RolePayload = {
+  code?: string;
+  name: string;
+  description?: string;
+  permissions: string[];
+  defaultDataScope: AccountDataScope | string;
+  defaultDepartment?: string;
+  enabled?: boolean;
+  sortOrder?: number;
+};
+
+export type DepartmentConfig = {
+  id: number;
+  code: string;
+  name: string;
+  parentCode?: string;
+  enabled: boolean;
+  sortOrder?: number;
+  source?: string;
+  accountCount?: number;
+  roleCount?: number;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type DepartmentPayload = {
+  code?: string;
+  name: string;
+  parentCode?: string;
+  enabled?: boolean;
+  sortOrder?: number;
+};
 
 export type Account = {
   id: number;
@@ -128,6 +177,8 @@ export type AccountPayload = {
 export type SsoConfig = {
   enabled: boolean;
   providerName: string;
+  callbackConfigured?: boolean;
+  autoProvision?: boolean;
 };
 
 export type SsoLoginResponse = {
@@ -400,11 +451,15 @@ export type ReportSubScore = {
   label: string;
   value: number;
   delta: string;
+  deltaValue?: number;
+  deltaTone?: "up" | "down" | "flat" | string;
 };
 
 export type ReportAnalysisSummary = {
   total: number;
   current: number;
+  newIssues?: number;
+  pending?: number;
   overdue: number;
   reopened: number;
   highPriority: number;
@@ -414,6 +469,7 @@ export type ReportAnalysisSummary = {
   reopenedRate: number;
   averageHandleHours: number;
   governanceScore: number;
+  governanceDelta?: number;
   subScores: ReportSubScore[];
 };
 
@@ -452,17 +508,87 @@ export type ReportEfficiencyBucket = {
 };
 
 export type ReportKeyChange = {
+  metric?: string;
   title: string;
   description: string;
+  detail?: string;
+  value?: string;
+  delta?: number;
+  direction?: "up" | "down" | "flat" | string;
+  evidence?: number;
   tone: "primary" | "warning" | "positive" | "neutral" | string;
 };
 
+export type ReportPeriod = {
+  startDate: string;
+  endDate: string;
+  previousStartDate: string;
+  previousEndDate: string;
+  label: string;
+  previousLabel: string;
+};
+
+export type ReportPeriodSummaryItem = {
+  label: string;
+  value: number;
+  previousValue: number;
+  delta: string;
+  deltaValue: number;
+  deltaRate: number;
+  tone: "up" | "down" | "danger" | "flat" | string;
+};
+
+export type ReportStructureMatrixRow = {
+  name: string;
+  source: number;
+  impact: number;
+  reopened: number;
+  overdue: number;
+  value?: number;
+};
+
+export type ReportPriorityEfficiencyRow = {
+  label: string;
+  values: number[];
+  average: number;
+  averageDays?: number;
+  total?: number;
+};
+
+export type ReportDatasetCard = {
+  key: string;
+  title: string;
+  desc?: string;
+  description?: string;
+  count: number;
+  unit?: string;
+  countLabel?: string;
+  tone: string;
+};
+
+export type ReportTrendEvent = {
+  date: string;
+  label: string;
+};
+
 export type ReportAnalysisData = {
+  period?: ReportPeriod;
+  appliedFilters?: {
+    departments?: string[];
+    startDate?: string;
+    endDate?: string;
+  };
+  availableDepartments?: string[];
   summary: ReportAnalysisSummary;
+  periodSummary?: ReportPeriodSummaryItem[];
   dimensions: ReportDimension[];
   trend: ReportAnalysisTrendPoint[];
   efficiencyBuckets: ReportEfficiencyBucket[];
   keyChanges: ReportKeyChange[];
+  structureMatrix?: ReportStructureMatrixRow[];
+  priorityEfficiency?: ReportPriorityEfficiencyRow[];
+  datasets?: ReportDatasetCard[];
+  events?: ReportTrendEvent[];
   issues: Issue[];
   metricDefinitions: string[];
   updatedAt: string;

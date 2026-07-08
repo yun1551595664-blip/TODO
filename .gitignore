@@ -2,10 +2,15 @@ frontend/node_modules/
 frontend/dist/
 frontend/.npm-cache/
 frontend/*.tsbuildinfo
+frontend/playwright-report/
+frontend/test-results/
 backend/target/
 output/
+backups/
 .idea/
 .vscode/
 *.log
 .env
+.env.local
+.env.*.local
 .playwright-cli/

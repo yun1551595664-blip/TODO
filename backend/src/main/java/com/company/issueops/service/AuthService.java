@@ -23,18 +23,12 @@ public class AuthService {
 
   public static final String REQUEST_USER_ATTRIBUTE = "currentUser";
 
-  private static final Set<String> ROLES = Set.of(
-    "ADMIN",
-    "PRODUCT",
-    "TECH",
-    "CS",
-    "VIEWER"
-  );
-
   private final ObjectMapper objectMapper;
   private final UserAccountRepository accounts;
   private final PasswordHashService passwordHashService;
   private final DataScopeService dataScopeService;
+  private final RoleService roleService;
+  private final DepartmentService departmentService;
 
   @Value("${auth.secret}")
   private String secret;
@@ -54,9 +48,23 @@ public class AuthService {
   @Value("${auth.sso.login-url:}")
   private String ssoLoginUrl;
 
+  @Value("${auth.sso.callback-secret:}")
+  private String ssoCallbackSecret;
+
+  @Value("${auth.sso.auto-provision:true}")
+  private boolean ssoAutoProvision;
+
+  @Value("${auth.sso.default-role:VIEWER}")
+  private String ssoDefaultRole;
+
+  @Value("${auth.sso.default-data-scope:DEPARTMENT}")
+  private String ssoDefaultDataScope;
+
   @PostConstruct
   void init() {
+    roleService.ensureSystemRoles();
     syncConfiguredAccounts();
+    departmentService.syncBaselineDepartments();
   }
 
   @Transactional
@@ -66,6 +74,9 @@ public class AuthService {
       .orElseThrow(() -> new IllegalArgumentException("账号或密码不正确"));
     if (!Boolean.TRUE.equals(account.getEnabled())) {
       throw new IllegalArgumentException("账号已停用，请联系管理员");
+    }
+    if (!roleService.isRoleEnabled(account.getRole())) {
+      throw new IllegalArgumentException("账号角色已停用，请联系管理员");
     }
     if (!passwordHashService.matches(password, account.getPasswordHash())) {
       throw new IllegalArgumentException("账号或密码不正确");
@@ -104,6 +115,7 @@ public class AuthService {
       return accounts
         .findByUsername(normalize(username))
         .filter(account -> Boolean.TRUE.equals(account.getEnabled()))
+        .filter(account -> roleService.isRoleEnabled(account.getRole()))
         .map(this::toUser);
     } catch (Exception ignored) {
       return Optional.empty();
@@ -116,6 +128,12 @@ public class AuthService {
 
     if (path.startsWith("/api/accounts")) {
       return hasPermission(user, "account:manage");
+    }
+    if (path.startsWith("/api/roles")) {
+      return hasPermission(user, "account:manage");
+    }
+    if (path.startsWith("/api/departments")) {
+      return "GET".equalsIgnoreCase(method) || hasPermission(user, "account:manage");
     }
     if (path.startsWith("/api/dictionaries")) {
       return hasPermission(user, "field:manage");
@@ -142,8 +160,20 @@ public class AuthService {
     if (path.equals("/api/ai-insights/actions/execute")) {
       return hasPermission(user, "ai:execute");
     }
+    if (path.matches("/api/issues/\\d+/ai/[^/]+")) {
+      return hasPermission(user, "ai:execute");
+    }
+    if (path.equals("/api/retrospectives/draft")) {
+      return hasPermission(user, "ai:execute");
+    }
+    if (path.equals("/api/dashboard/ai-insight/query")) {
+      return true;
+    }
+    if (path.startsWith("/api/ai-insights/")) {
+      return true;
+    }
 
-    return true;
+    return false;
   }
 
   public boolean hasPermission(AuthUser user, String permission) {
@@ -172,9 +202,19 @@ public class AuthService {
   @Transactional
   public AccountView updateAccount(Long id, AccountMutation mutation) {
     UserAccount account = getAccount(id);
-    boolean disabling = Boolean.FALSE.equals(mutation.enabled());
-    if (disabling && isLastEnabledAdmin(account)) {
-      throw new IllegalArgumentException("不能停用最后一个启用的管理员账号");
+    String targetRole = normalizeRole(
+      mutation.role() == null || mutation.role().isBlank()
+        ? account.getRole()
+        : mutation.role()
+    );
+    boolean targetEnabled = mutation.enabled() == null
+      ? Boolean.TRUE.equals(account.getEnabled())
+      : mutation.enabled();
+    if (
+      isLastEnabledAccountManager(account) &&
+      (!targetEnabled || !roleService.hasPermission(targetRole, RoleService.ACCOUNT_MANAGE))
+    ) {
+      throw new IllegalArgumentException("不能移除最后一个启用账号管理者");
     }
     if (mutation.password() != null && !mutation.password().isBlank()) {
       requirePassword(mutation.password(), false);
@@ -187,15 +227,20 @@ public class AuthService {
   @Transactional
   public AccountView enabled(Long id, boolean enabled) {
     UserAccount account = getAccount(id);
-    if (!enabled && isLastEnabledAdmin(account)) {
-      throw new IllegalArgumentException("不能停用最后一个启用的管理员账号");
+    if (!enabled && isLastEnabledAccountManager(account)) {
+      throw new IllegalArgumentException("不能停用最后一个启用账号管理者");
     }
     account.setEnabled(enabled);
     return toView(accounts.save(account));
   }
 
   public SsoConfig ssoConfig() {
-    return new SsoConfig(ssoEnabled, ssoProviderName);
+    return new SsoConfig(
+      ssoEnabled,
+      ssoProviderName,
+      ssoEnabled && ssoCallbackSecret != null && !ssoCallbackSecret.isBlank(),
+      ssoAutoProvision
+    );
   }
 
   public SsoLoginResponse ssoLogin() {
@@ -203,6 +248,79 @@ public class AuthService {
       throw new IllegalStateException("企业 SSO 尚未启用");
     }
     return new SsoLoginResponse(ssoProviderName, ssoLoginUrl);
+  }
+
+  @Transactional
+  public AuthSession ssoCallback(SsoCallbackRequest request, String callbackToken) {
+    if (!ssoEnabled) throw new IllegalStateException("企业 SSO 尚未启用");
+    if (ssoCallbackSecret == null || ssoCallbackSecret.isBlank()) {
+      throw new IllegalStateException("SSO 回调密钥尚未配置");
+    }
+    if (!constantTimeEquals(ssoCallbackSecret, Objects.toString(callbackToken, ""))) {
+      throw new IllegalArgumentException("SSO 回调密钥不正确");
+    }
+    String subject = nonBlank(request.subject(), "");
+    if (subject.isBlank()) throw new IllegalArgumentException("SSO subject 不能为空");
+    String username = normalize(nonBlank(request.username(), subject));
+    if (username.isBlank()) throw new IllegalArgumentException("SSO 用户账号不能为空");
+    String displayName = nonBlank(request.displayName(), username);
+    String targetRole = normalizeRole(nonBlank(request.role(), ssoDefaultRole));
+    String targetScope = dataScopeService.normalizeScope(
+      nonBlank(request.dataScope(), nonBlank(ssoDefaultDataScope, roleService.defaultScope(targetRole))),
+      targetRole
+    );
+    String department = departmentService.normalizeDepartment(
+      request.department(),
+      roleService.defaultDepartment(targetRole, displayName)
+    );
+
+    Optional<UserAccount> bySubject = accounts.findBySsoSubject(subject);
+    Optional<UserAccount> byUsername = accounts.findByUsername(username);
+    if (
+      bySubject.isPresent() &&
+      byUsername.isPresent() &&
+      !Objects.equals(bySubject.get().getId(), byUsername.get().getId())
+    ) {
+      throw new IllegalArgumentException("SSO 标识已绑定其他账号");
+    }
+
+    UserAccount account = bySubject.or(() -> byUsername).orElseGet(() -> {
+      if (!ssoAutoProvision) {
+        throw new IllegalArgumentException("SSO 自动创建账号未启用");
+      }
+      UserAccount created = new UserAccount();
+      created.setUsername(username);
+      created.setPasswordHash(passwordHashService.hash(UUID.randomUUID().toString()));
+      created.setRole(targetRole);
+      created.setDataScope(targetScope);
+      created.setEnabled(true);
+      return created;
+    });
+
+    if (!Boolean.TRUE.equals(account.getEnabled())) {
+      throw new IllegalArgumentException("账号已停用，请联系管理员");
+    }
+    if (account.getSsoSubject() != null && !account.getSsoSubject().isBlank() &&
+      !Objects.equals(account.getSsoSubject(), subject)) {
+      throw new IllegalArgumentException("账号已绑定其他 SSO 标识");
+    }
+    if (!roleService.isRoleEnabled(account.getRole())) {
+      throw new IllegalArgumentException("账号角色已停用，请联系管理员");
+    }
+
+    account.setSsoSubject(subject);
+    account.setDisplayName(displayName);
+    account.setDepartment(departmentService.ensureDepartment(department, "SSO"));
+    if (account.getRole() == null || account.getRole().isBlank()) account.setRole(targetRole);
+    if (account.getDataScope() == null || account.getDataScope().isBlank()) {
+      account.setDataScope(targetScope);
+    }
+    account.setLastLoginAt(LocalDateTime.now());
+    account = accounts.save(account);
+
+    long expiresAt = Instant.now().plusSeconds(tokenTtlSeconds).getEpochSecond();
+    AuthUser user = toUser(account);
+    return new AuthSession(issueToken(user, expiresAt), user, expiresAt);
   }
 
   private void syncConfiguredAccounts() {
@@ -278,10 +396,17 @@ public class AuthService {
     account.setDepartment(
       nonBlank(
         mutation.department(),
-        dataScopeService.defaultDepartment(role, account.getDisplayName())
+        roleService.defaultDepartment(role, account.getDisplayName())
       )
     );
-    account.setDataScope(dataScopeService.normalizeScope(mutation.dataScope(), role));
+    account.setDataScope(
+      dataScopeService.normalizeScope(
+        mutation.dataScope() == null || mutation.dataScope().isBlank()
+          ? roleService.defaultScope(role)
+          : mutation.dataScope(),
+        role
+      )
+    );
     account.setSsoSubject(blankToNull(mutation.ssoSubject()));
     if (creating) {
       account.setEnabled(mutation.enabled() == null || mutation.enabled());
@@ -298,11 +423,18 @@ public class AuthService {
     if (password.length() < 8) throw new IllegalArgumentException("密码至少 8 位");
   }
 
-  private boolean isLastEnabledAdmin(UserAccount account) {
+  private boolean isLastEnabledAccountManager(UserAccount account) {
     return (
-      "ADMIN".equals(account.getRole()) &&
+      isEnabledAccountManager(account) &&
+      accounts.findAll().stream().filter(this::isEnabledAccountManager).count() <= 1
+    );
+  }
+
+  private boolean isEnabledAccountManager(UserAccount account) {
+    return (
+      account != null &&
       Boolean.TRUE.equals(account.getEnabled()) &&
-      accounts.countByRoleAndEnabledTrue("ADMIN") <= 1
+      roleService.hasPermission(account.getRole(), RoleService.ACCOUNT_MANAGE)
     );
   }
 
@@ -315,10 +447,10 @@ public class AuthService {
     String displayName = parts[3].trim();
     String department = parts.length >= 5 && !parts[4].isBlank()
       ? parts[4].trim()
-      : dataScopeService.defaultDepartment(role, displayName);
+      : roleService.defaultDepartment(role, displayName);
     String dataScope = parts.length >= 6
       ? dataScopeService.normalizeScope(parts[5], role)
-      : dataScopeService.defaultScope(role);
+      : roleService.defaultScope(role);
     return new SeedAccount(normalize(parts[0]), parts[1], role, displayName, department, dataScope);
   }
 
@@ -329,7 +461,7 @@ public class AuthService {
       account.getRole(),
       account.getDepartment(),
       dataScopeService.normalizeScope(account.getDataScope(), account.getRole()),
-      permissionsFor(account.getRole())
+      roleService.permissionsFor(account.getRole())
     );
   }
 
@@ -347,31 +479,6 @@ public class AuthService {
       account.getCreatedAt(),
       account.getUpdatedAt()
     );
-  }
-
-  private List<String> permissionsFor(String role) {
-    return switch (role) {
-      case "ADMIN" -> List.of(
-        "issue:create",
-        "issue:edit",
-        "issue:delete",
-        "issue:status",
-        "issue:log",
-        "field:manage",
-        "account:manage",
-        "ai:execute"
-      );
-      case "PRODUCT" -> List.of(
-        "issue:create",
-        "issue:edit",
-        "issue:status",
-        "issue:log",
-        "ai:execute"
-      );
-      case "TECH" -> List.of("issue:edit", "issue:status", "issue:log", "ai:execute");
-      case "CS" -> List.of("issue:create", "issue:log");
-      default -> List.of();
-    };
   }
 
   private String issueToken(AuthUser user, long expiresAt) {
@@ -414,9 +521,7 @@ public class AuthService {
   }
 
   private String normalizeRole(String role) {
-    String normalized = Objects.toString(role, "").trim().toUpperCase(Locale.ROOT);
-    if (!ROLES.contains(normalized)) throw new IllegalArgumentException("无效角色：" + role);
-    return normalized;
+    return roleService.normalizeRole(role);
   }
 
   private String nonBlank(String value, String fallback) {
@@ -474,7 +579,21 @@ public class AuthService {
 
   public record AuthSession(String token, AuthUser user, long expiresAt) {}
 
-  public record SsoConfig(boolean enabled, String providerName) {}
+  public record SsoConfig(
+    boolean enabled,
+    String providerName,
+    boolean callbackConfigured,
+    boolean autoProvision
+  ) {}
 
   public record SsoLoginResponse(String providerName, String loginUrl) {}
+
+  public record SsoCallbackRequest(
+    String subject,
+    String username,
+    String displayName,
+    String department,
+    String role,
+    String dataScope
+  ) {}
 }

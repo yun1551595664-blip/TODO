@@ -237,8 +237,15 @@ public class IssueController {
   }
 
   @GetMapping("/reports/analysis")
-  ApiResponse<Map<String, Object>> reportAnalysis(HttpServletRequest request) {
-    return ApiResponse.ok(service.reportAnalysis(currentUser(request)));
+  ApiResponse<Map<String, Object>> reportAnalysis(
+    @RequestParam(required = false) String startDate,
+    @RequestParam(required = false) String endDate,
+    @RequestParam(required = false) String departments,
+    HttpServletRequest request
+  ) {
+    return ApiResponse.ok(
+      service.reportAnalysis(currentUser(request), startDate, endDate, departments)
+    );
   }
 
   @PostMapping("/issues/{id}/ai/{type}")

@@ -2,31 +2,40 @@ services:
   mysql:
     image: mysql:8.4
     environment:
-      MYSQL_ROOT_PASSWORD: root123456
-      MYSQL_DATABASE: issue_ops
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-root123456}
+      MYSQL_DATABASE: ${DB_NAME:-issue_ops}
       TZ: Asia/Shanghai
     ports: ["${MYSQL_PORT:-3306}:3306"]
     volumes:
       - mysql_data:/var/lib/mysql
       - ./mysql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
-    healthcheck: {test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot123456"], interval: 10s, timeout: 5s, retries: 10}
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p\"$${MYSQL_ROOT_PASSWORD}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
   backend:
     build: ./backend
     dns:
       - ${DOCKER_DNS_PRIMARY:-223.5.5.5}
       - ${DOCKER_DNS_SECONDARY:-114.114.114.114}
     environment:
-      DB_URL: jdbc:mysql://mysql:3306/issue_ops?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
-      DB_USERNAME: root
-      DB_PASSWORD: root123456
+      DB_URL: jdbc:mysql://mysql:3306/${DB_NAME:-issue_ops}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      DB_USERNAME: ${DB_USERNAME:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-root123456}
       TZ: Asia/Shanghai
       JAVA_TOOL_OPTIONS: -Duser.timezone=Asia/Shanghai
       AUTH_SECRET: ${AUTH_SECRET:-dev-local-issue-ops-secret-change-me}
       AUTH_TOKEN_TTL_SECONDS: ${AUTH_TOKEN_TTL_SECONDS:-28800}
-      AUTH_USERS: ${AUTH_USERS:-admin|admin123|ADMIN|照远;product|product123|PRODUCT|产品负责人;tech|tech123|TECH|技术负责人;cs|cs123|CS|客服同学;viewer|viewer123|VIEWER|观察员}
+      AUTH_USERS: ${AUTH_USERS:-admin|admin123|ADMIN|照远|全部|ALL;product|product123|PRODUCT|产品负责人|产品部|DEPARTMENT;tech|tech123|TECH|技术负责人|技术部|DEPARTMENT;cs|cs123|CS|客服同学|客服部|OWN;viewer|viewer123|VIEWER|观察员|全部|ALL}
       AUTH_SSO_ENABLED: ${AUTH_SSO_ENABLED:-false}
       AUTH_SSO_PROVIDER_NAME: ${AUTH_SSO_PROVIDER_NAME:-企业 SSO}
       AUTH_SSO_LOGIN_URL: ${AUTH_SSO_LOGIN_URL:-}
+      AUTH_SSO_CALLBACK_SECRET: ${AUTH_SSO_CALLBACK_SECRET:-}
+      AUTH_SSO_AUTO_PROVISION: ${AUTH_SSO_AUTO_PROVISION:-true}
+      AUTH_SSO_DEFAULT_ROLE: ${AUTH_SSO_DEFAULT_ROLE:-VIEWER}
+      AUTH_SSO_DEFAULT_DATA_SCOPE: ${AUTH_SSO_DEFAULT_DATA_SCOPE:-DEPARTMENT}
+      ORG_DEPARTMENTS: ${ORG_DEPARTMENTS:-全部,产品部,技术部,客服部,管理部}
       AI_PROVIDER: ${AI_PROVIDER:-deepseek}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_BASE_URL: ${AI_BASE_URL:-https://api.deepseek.com}

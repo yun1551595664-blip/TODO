@@ -2,6 +2,10 @@ import axios from "axios";
 import type {
   Account,
   AccountPayload,
+  DepartmentConfig,
+  DepartmentPayload,
+  RoleConfig,
+  RolePayload,
   AuthSession,
   AuthUser,
   AuditLog,
@@ -191,6 +195,63 @@ export const issueApi = {
       })
       .then((response) => response.data),
 
+  roles: (params?: { enabledOnly?: boolean }) =>
+    http
+      .get<unknown, ApiResponse<RoleConfig[]>>("/roles", {
+        params,
+      })
+      .then((response) => response.data),
+
+  rolePermissions: () =>
+    http
+      .get<unknown, ApiResponse<Record<string, string>>>("/roles/permissions")
+      .then((response) => response.data),
+
+  roleCreate: (data: RolePayload) =>
+    http
+      .post<unknown, ApiResponse<RoleConfig>>("/roles", data)
+      .then((response) => response.data),
+
+  roleUpdate: (id: number, data: RolePayload) =>
+    http
+      .put<unknown, ApiResponse<RoleConfig>>(`/roles/${id}`, data)
+      .then((response) => response.data),
+
+  roleEnabled: (id: number, enabled: boolean) =>
+    http
+      .patch<unknown, ApiResponse<RoleConfig>>(`/roles/${id}/enabled`, {
+        enabled,
+      })
+      .then((response) => response.data),
+
+  roleRemove: (id: number) => http.delete(`/roles/${id}`),
+
+  departments: (params?: { enabledOnly?: boolean }) =>
+    http
+      .get<unknown, ApiResponse<DepartmentConfig[]>>("/departments", {
+        params,
+      })
+      .then((response) => response.data),
+
+  departmentCreate: (data: DepartmentPayload) =>
+    http
+      .post<unknown, ApiResponse<DepartmentConfig>>("/departments", data)
+      .then((response) => response.data),
+
+  departmentUpdate: (id: number, data: DepartmentPayload) =>
+    http
+      .put<unknown, ApiResponse<DepartmentConfig>>(`/departments/${id}`, data)
+      .then((response) => response.data),
+
+  departmentEnabled: (id: number, enabled: boolean) =>
+    http
+      .patch<unknown, ApiResponse<DepartmentConfig>>(`/departments/${id}/enabled`, {
+        enabled,
+      })
+      .then((response) => response.data),
+
+  departmentRemove: (id: number) => http.delete(`/departments/${id}`),
+
   list: (params: Record<string, unknown>) =>
     http
       .get<unknown, ApiResponse<PageData<Issue>>>("/issues", { params })
@@ -306,9 +367,15 @@ export const issueApi = {
       .get<unknown, ApiResponse<ReportData>>("/reports/overview")
       .then((response) => response.data),
 
-  reportAnalysis: () =>
+  reportAnalysis: (params?: {
+    startDate?: string;
+    endDate?: string;
+    departments?: string;
+  }) =>
     http
-      .get<unknown, ApiResponse<ReportAnalysisData>>("/reports/analysis")
+      .get<unknown, ApiResponse<ReportAnalysisData>>("/reports/analysis", {
+        params,
+      })
       .then((response) => response.data),
 
   retrospectiveOverview: () =>

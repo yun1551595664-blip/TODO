@@ -30,6 +30,8 @@ public class AuthFilter extends OncePerRequestFilter {
     String path = request.getRequestURI();
     if (
       !path.startsWith("/api") ||
+      path.equals("/api/health") ||
+      path.equals("/api/readiness") ||
       path.equals("/api/auth/login") ||
       path.startsWith("/api/auth/sso/")
     ) {

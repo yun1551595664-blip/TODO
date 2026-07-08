@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.criteria.Predicate;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -38,6 +39,32 @@ public class IssueService {
   private final ObjectMapper objectMapper;
   private final ApplicationEventPublisher events;
   private final DataScopeService dataScopeService;
+
+  private record ReportPeriod(
+    LocalDate start,
+    LocalDate end,
+    LocalDate previousStart,
+    LocalDate previousEnd
+  ) {}
+
+  private record AnalysisMetrics(
+    long total,
+    long newIssues,
+    long completed,
+    long pending,
+    long overdue,
+    long reopened,
+    long highPriority,
+    double slaRate,
+    double overdueRate,
+    double reopenedRate,
+    double averageHandleHours,
+    int governanceScore,
+    int closureScore,
+    int overdueScore,
+    int reopenedScore,
+    int responseScore
+  ) {}
 
   private LocalDate today() {
     return LocalDate.now(BUSINESS_ZONE);
@@ -718,9 +745,51 @@ public class IssueService {
   }
 
   public Map<String, Object> reportAnalysis(AuthUser user) {
-    List<Issue> all = visibleIssues(user);
+    return reportAnalysis(user, null, null);
+  }
+
+  public Map<String, Object> reportAnalysis(
+    AuthUser user,
+    String startDate,
+    String endDate
+  ) {
+    return reportAnalysis(user, startDate, endDate, null);
+  }
+
+  public Map<String, Object> reportAnalysis(
+    AuthUser user,
+    String startDate,
+    String endDate,
+    String departments
+  ) {
+    List<Issue> visible = visibleIssues(user);
+    List<String> selectedDepartments = parseFilterValues(departments);
+    List<String> availableDepartments = availableDepartments(visible);
+    List<Issue> all = filterByDepartments(visible, selectedDepartments);
+    ReportPeriod period = resolveReportPeriod(startDate, endDate);
+    List<Issue> currentScope = all
+      .stream()
+      .filter(issue -> activeDuring(issue, period.start(), period.end()))
+      .toList();
+    List<Issue> previousScope = all
+      .stream()
+      .filter(issue ->
+        activeDuring(issue, period.previousStart(), period.previousEnd())
+      )
+      .toList();
+    AnalysisMetrics current = analysisMetrics(currentScope, period);
+    AnalysisMetrics previous = analysisMetrics(
+      previousScope,
+      new ReportPeriod(
+        period.previousStart(),
+        period.previousEnd(),
+        period.previousStart(),
+        period.previousEnd()
+      )
+    );
     List<Issue> rankedIssues = all
       .stream()
+      .filter(issue -> activeDuring(issue, period.start(), period.end()))
       .sorted(
         Comparator
           .comparingInt(this::issueRiskScore)
@@ -734,25 +803,82 @@ public class IssueService {
       .toList();
 
     Map<String, Object> result = new LinkedHashMap<>();
-    result.put("summary", buildAnalysisSummary(all));
+    result.put(
+      "period",
+      map(
+        "startDate",
+        period.start().toString(),
+        "endDate",
+        period.end().toString(),
+        "previousStartDate",
+        period.previousStart().toString(),
+        "previousEndDate",
+        period.previousEnd().toString(),
+        "label",
+        period.start() + " 至 " + period.end(),
+        "previousLabel",
+        period.previousStart() + " 至 " + period.previousEnd()
+      )
+    );
+    result.put(
+      "appliedFilters",
+      map(
+        "departments",
+        selectedDepartments,
+        "startDate",
+        startDate,
+        "endDate",
+        endDate
+      )
+    );
+    result.put("availableDepartments", availableDepartments);
+    result.put("summary", buildAnalysisSummary(current, previous));
+    result.put("periodSummary", buildPeriodSummary(current, previous));
     result.put(
       "dimensions",
       List.of(
-        buildDimension("businessScene", "业务场景", all, Issue::getBusinessScene),
-        buildDimension("issueType", "问题类型", all, Issue::getIssueType),
+        buildDimension(
+          "businessScene",
+          "业务场景",
+          currentScope,
+          period,
+          Issue::getBusinessScene
+        ),
+        buildDimension(
+          "issueType",
+          "问题类型",
+          currentScope,
+          period,
+          Issue::getIssueType
+        ),
         buildDimension(
           "responsibleDepartment",
           "责任部门",
-          all,
+          currentScope,
+          period,
           Issue::getResponsibleDepartment
         ),
-        buildDimension("source", "问题来源", all, Issue::getSource),
-        buildDimension("impactScope", "影响范围", all, Issue::getImpactScope)
+        buildDimension("source", "问题来源", currentScope, period, Issue::getSource),
+        buildDimension(
+          "impactScope",
+          "影响范围",
+          currentScope,
+          period,
+          Issue::getImpactScope
+        )
       )
     );
-    result.put("trend", buildAnalysisTrend(all));
-    result.put("efficiencyBuckets", buildEfficiencyBuckets(all));
-    result.put("keyChanges", buildKeyChanges(all));
+    List<Map<String, Object>> trend = buildAnalysisTrend(all, period);
+    result.put("trend", trend);
+    result.put("efficiencyBuckets", buildEfficiencyBuckets(currentScope, period));
+    result.put("keyChanges", buildKeyChanges(current, previous));
+    result.put("structureMatrix", buildStructureMatrix(currentScope, period));
+    result.put("priorityEfficiency", buildPriorityEfficiency(currentScope, period));
+    result.put(
+      "datasets",
+      buildAnalysisDatasets(current, result.get("dimensions"))
+    );
+    result.put("events", buildTrendEvents(trend));
     result.put("issues", rankedIssues);
     result.put(
       "metricDefinitions",
@@ -767,55 +893,100 @@ public class IssueService {
     return result;
   }
 
-  private Map<String, Object> buildAnalysisSummary(List<Issue> all) {
-    long total = all.size();
-    long overdue = all.stream().filter(this::isOverdue).count();
-    long reopened = all.stream().filter(i -> Boolean.TRUE.equals(i.getReopened())).count();
-    long highPriority = all.stream().filter(this::isHighPriorityOpen).count();
-    long completed = all.stream().filter(this::isCompleted).count();
-    double averageHours = averageHandleHours(all);
-    double overdueRate = ratio(overdue, total);
-    double reopenedRate = ratio(reopened, total);
-    double slaRate = total == 0 ? 100 : Math.max(0, 100 - overdueRate);
-    int closureScore = score(ratio(completed, total));
-    int overdueScore = score(100 - overdueRate);
-    int reopenedScore = score(100 - reopenedRate);
-    int responseScore = score(100 - ratio(highPriority, Math.max(1, total)));
-    int governanceScore = Math.round(
-      (closureScore * 0.28f) +
-      (overdueScore * 0.32f) +
-      (reopenedScore * 0.24f) +
-      (responseScore * 0.16f)
-    );
-
+  private Map<String, Object> buildAnalysisSummary(
+    AnalysisMetrics current,
+    AnalysisMetrics previous
+  ) {
     Map<String, Object> summary = new LinkedHashMap<>();
-    summary.put("total", total);
-    summary.put("current", total);
-    summary.put("overdue", overdue);
-    summary.put("reopened", reopened);
-    summary.put("highPriority", highPriority);
-    summary.put("completed", completed);
-    summary.put("slaRate", round1(slaRate));
-    summary.put("overdueRate", round1(overdueRate));
-    summary.put("reopenedRate", round1(reopenedRate));
-    summary.put("averageHandleHours", round1(averageHours));
-    summary.put("governanceScore", governanceScore);
+    summary.put("total", current.total());
+    summary.put("current", current.total());
+    summary.put("newIssues", current.newIssues());
+    summary.put("pending", current.pending());
+    summary.put("overdue", current.overdue());
+    summary.put("reopened", current.reopened());
+    summary.put("highPriority", current.highPriority());
+    summary.put("completed", current.completed());
+    summary.put("slaRate", round1(current.slaRate()));
+    summary.put("overdueRate", round1(current.overdueRate()));
+    summary.put("reopenedRate", round1(current.reopenedRate()));
+    summary.put("averageHandleHours", round1(current.averageHandleHours()));
+    summary.put("governanceScore", current.governanceScore());
+    summary.put("governanceDelta", current.governanceScore() - previous.governanceScore());
     summary.put(
       "subScores",
       List.of(
-        map("label", "闭环效率", "value", closureScore, "delta", deltaText(completed, "已完成")),
-        map("label", "超期控制", "value", overdueScore, "delta", overdue + " 个超期"),
-        map("label", "复发控制", "value", reopenedScore, "delta", reopened + " 个复发"),
-        map("label", "高优先级响应", "value", responseScore, "delta", highPriority + " 个 P0/P1")
+        subScore("闭环效率", current.closureScore(), previous.closureScore()),
+        subScore("超期控制", current.overdueScore(), previous.overdueScore()),
+        subScore("复发控制", current.reopenedScore(), previous.reopenedScore()),
+        subScore("高优先级响应", current.responseScore(), previous.responseScore())
       )
     );
     return summary;
+  }
+
+  private Map<String, Object> subScore(String label, int current, int previous) {
+    int delta = current - previous;
+    return map(
+      "label",
+      label,
+      "value",
+      current,
+      "delta",
+      signed(delta),
+      "deltaValue",
+      delta,
+      "deltaTone",
+      delta >= 0 ? "up" : "down"
+    );
+  }
+
+  private List<Map<String, Object>> buildPeriodSummary(
+    AnalysisMetrics current,
+    AnalysisMetrics previous
+  ) {
+    return List.of(
+      periodMetric("新增问题", current.newIssues(), previous.newIssues(), false),
+      periodMetric("完成问题", current.completed(), previous.completed(), false),
+      periodMetric("待处理问题", current.pending(), previous.pending(), true),
+      periodMetric("超期问题", current.overdue(), previous.overdue(), true)
+    );
+  }
+
+  private Map<String, Object> periodMetric(
+    String label,
+    long current,
+    long previous,
+    boolean lowerIsBetter
+  ) {
+    long delta = current - previous;
+    String tone = delta == 0
+      ? "flat"
+      : lowerIsBetter
+        ? (delta > 0 ? "danger" : "up")
+        : (delta > 0 ? "up" : "down");
+    return map(
+      "label",
+      label,
+      "value",
+      current,
+      "previousValue",
+      previous,
+      "delta",
+      signed(delta),
+      "deltaValue",
+      delta,
+      "deltaRate",
+      round1(percentChange(current, previous)),
+      "tone",
+      tone
+    );
   }
 
   private Map<String, Object> buildDimension(
     String key,
     String label,
     List<Issue> all,
+    ReportPeriod period,
     Function<Issue, String> extractor
   ) {
     long total = all.size();
@@ -824,7 +995,7 @@ public class IssueService {
       .collect(Collectors.groupingBy(issue -> value(extractor.apply(issue), "未分配")))
       .entrySet()
       .stream()
-      .map(entry -> buildDimensionItem(entry.getKey(), entry.getValue(), total))
+      .map(entry -> buildDimensionItem(entry.getKey(), entry.getValue(), total, period))
       .sorted((a, b) -> Long.compare((Long) b.get("value"), (Long) a.get("value")))
       .limit(12)
       .toList();
@@ -834,12 +1005,16 @@ public class IssueService {
   private Map<String, Object> buildDimensionItem(
     String name,
     List<Issue> group,
-    long total
+    long total,
+    ReportPeriod period
   ) {
     long count = group.size();
-    long overdue = group.stream().filter(this::isOverdue).count();
+    long overdue = group.stream().filter(issue -> isOverdueAtEnd(issue, period.end())).count();
     long reopened = group.stream().filter(i -> Boolean.TRUE.equals(i.getReopened())).count();
-    long highPriority = group.stream().filter(this::isHighPriorityOpen).count();
+    long highPriority = group
+      .stream()
+      .filter(issue -> isHighPriority(issue) && !isCompletedByEnd(issue, period.end()))
+      .count();
     return map(
       "key",
       name,
@@ -858,25 +1033,30 @@ public class IssueService {
       "reopenedRate",
       round1(ratio(reopened, count)),
       "averageHandleHours",
-      round1(averageHandleHours(group)),
+      round1(averageHandleHoursInPeriod(group, period)),
       "riskLevel",
       riskLevel(overdue, reopened, highPriority)
     );
   }
 
-  private List<Map<String, Object>> buildAnalysisTrend(List<Issue> all) {
-    LocalDate end = today();
-    LocalDate start = end.minusDays(29);
+  private List<Map<String, Object>> buildAnalysisTrend(
+    List<Issue> all,
+    ReportPeriod period
+  ) {
     List<Map<String, Object>> trend = new ArrayList<>();
-    for (LocalDate date = start; !date.isAfter(end); date = date.plusDays(1)) {
+    for (
+      LocalDate date = period.start();
+      !date.isAfter(period.end());
+      date = date.plusDays(1)
+    ) {
       LocalDate currentDate = date;
       long created = all
         .stream()
-        .filter(issue -> sameDate(issue.getCreatedAt(), currentDate))
+        .filter(issue -> createdOn(issue, currentDate))
         .count();
       long completed = all
         .stream()
-        .filter(issue -> sameDate(issue.getActualFinishTime(), currentDate))
+        .filter(issue -> completedOn(issue, currentDate))
         .count();
       long pending = all.stream().filter(issue -> existedAndOpenOn(issue, currentDate)).count();
       long overdue = all.stream().filter(issue -> overdueOn(issue, currentDate)).count();
@@ -898,10 +1078,14 @@ public class IssueService {
     return trend;
   }
 
-  private List<Map<String, Object>> buildEfficiencyBuckets(List<Issue> all) {
+  private List<Map<String, Object>> buildEfficiencyBuckets(
+    List<Issue> all,
+    ReportPeriod period
+  ) {
     List<Issue> completed = all
       .stream()
-      .filter(issue -> issue.getActualFinishTime() != null && issue.getCreatedAt() != null)
+      .filter(issue -> completedInPeriod(issue, period))
+      .filter(issue -> issue.getCreatedAt() != null)
       .toList();
     return List.of(
       buildEfficiencyBucket("0-1天", completed, 0, 24),
@@ -937,37 +1121,316 @@ public class IssueService {
     );
   }
 
-  private List<Map<String, Object>> buildKeyChanges(List<Issue> all) {
-    String topType = topGroupName(all, Issue::getIssueType, "暂无类型数据");
-    String topDepartment = topGroupName(all, Issue::getResponsibleDepartment, "暂无部门数据");
-    long overdue = all.stream().filter(this::isOverdue).count();
-    long reopened = all.stream().filter(i -> Boolean.TRUE.equals(i.getReopened())).count();
+  private List<Map<String, Object>> buildKeyChanges(
+    AnalysisMetrics current,
+    AnalysisMetrics previous
+  ) {
     return List.of(
-      map(
-        "title",
-        "问题结构集中",
-        "description",
-        "当前问题最多集中在「" + topType + "」，建议优先查看类型剖面。",
-        "tone",
-        "primary"
+      keyChange(
+        "newIssues",
+        trendTitle(current.newIssues(), previous.newIssues(), "新增问题数上升", "新增问题数下降", "新增问题数持平"),
+        "新增问题 " + previous.newIssues() + " → " + current.newIssues(),
+        percentChange(current.newIssues(), previous.newIssues()),
+        current.newIssues(),
+        false
       ),
-      map(
-        "title",
-        "责任负载集中",
-        "description",
-        "责任部门中「" + topDepartment + "」问题量最高，需要关注排期和协同压力。",
-        "tone",
-        "neutral"
+      keyChange(
+        "overdue",
+        trendTitle(current.overdue(), previous.overdue(), "超期问题数上升", "超期问题数下降", "超期问题数持平"),
+        "超期问题 " + previous.overdue() + " → " + current.overdue(),
+        percentChange(current.overdue(), previous.overdue()),
+        current.overdue(),
+        true
       ),
-      map(
-        "title",
-        overdue > 0 ? "超期风险存在" : "超期风险可控",
-        "description",
-        "当前可见范围内有 " + overdue + " 个超期问题、" + reopened + " 个复发问题。",
-        "tone",
-        overdue > 0 ? "warning" : "positive"
+      keyChange(
+        "averageHandleDays",
+        trendTitle(
+          current.averageHandleHours(),
+          previous.averageHandleHours(),
+          "平均处理时长延长",
+          "平均处理时长缩短",
+          "平均处理时长持平"
+        ),
+        "平均处理时长 " +
+        round1(previous.averageHandleHours() / 24) +
+        "天 → " +
+        round1(current.averageHandleHours() / 24) +
+        "天",
+        round1((current.averageHandleHours() - previous.averageHandleHours()) / 24),
+        Math.max(1, current.completed()),
+        true,
+        "天"
+      ),
+      keyChange(
+        "reopened",
+        trendTitle(current.reopened(), previous.reopened(), "复发问题数上升", "复发问题数下降", "复发问题数持平"),
+        "复发问题 " + previous.reopened() + " → " + current.reopened(),
+        percentChange(current.reopened(), previous.reopened()),
+        current.reopened(),
+        true
+      ),
+      keyChange(
+        "highPriority",
+        current.highPriority() == previous.highPriority()
+          ? "高优问题积压持平"
+          : current.highPriority() < previous.highPriority()
+          ? "高优问题响应改善"
+          : "高优问题积压上升",
+        "P0/P1 未完成 " + previous.highPriority() + " → " + current.highPriority(),
+        percentChange(current.highPriority(), previous.highPriority()),
+        current.highPriority(),
+        true
       )
     );
+  }
+
+  private String trendTitle(
+    double current,
+    double previous,
+    String upTitle,
+    String downTitle,
+    String flatTitle
+  ) {
+    if (current > previous) return upTitle;
+    if (current < previous) return downTitle;
+    return flatTitle;
+  }
+
+  private Map<String, Object> keyChange(
+    String metric,
+    String title,
+    String description,
+    double delta,
+    long evidence,
+    boolean lowerIsBetter
+  ) {
+    return keyChange(metric, title, description, delta, evidence, lowerIsBetter, "%");
+  }
+
+  private Map<String, Object> keyChange(
+    String metric,
+    String title,
+    String description,
+    double delta,
+    long evidence,
+    boolean lowerIsBetter,
+    String unit
+  ) {
+    String direction = delta > 0 ? "up" : delta < 0 ? "down" : "flat";
+    String tone = delta == 0
+      ? "flat"
+      : lowerIsBetter
+      ? (delta > 0 ? "up danger" : "down")
+      : (delta >= 0 ? "up" : "down");
+    String value = "%".equals(unit)
+      ? signed(round1(delta)) + "%"
+      : signed(round1(delta)) + " " + unit;
+    return map(
+      "metric",
+      metric,
+      "title",
+      title,
+      "description",
+      description,
+      "detail",
+      description,
+      "value",
+      value,
+      "delta",
+      round1(delta),
+      "direction",
+      direction,
+      "tone",
+      tone,
+      "evidence",
+      evidence
+    );
+  }
+
+  private List<Map<String, Object>> buildStructureMatrix(
+    List<Issue> currentScope,
+    ReportPeriod period
+  ) {
+    return currentScope
+      .stream()
+      .collect(Collectors.groupingBy(issue -> value(issue.getIssueType(), "未分配")))
+      .entrySet()
+      .stream()
+      .map(entry -> {
+        List<Issue> group = entry.getValue();
+        long total = group.size();
+        long reopened = group.stream().filter(i -> Boolean.TRUE.equals(i.getReopened())).count();
+        long overdue = group
+          .stream()
+          .filter(issue -> isOverdueAtEnd(issue, period.end()))
+          .count();
+        return map(
+          "name",
+          entry.getKey(),
+          "source",
+          Math.round(topShare(group, Issue::getSource)),
+          "impact",
+          Math.round(topShare(group, Issue::getImpactScope)),
+          "reopened",
+          Math.round(ratio(reopened, total)),
+          "overdue",
+          Math.round(ratio(overdue, total)),
+          "value",
+          total
+        );
+      })
+      .sorted((a, b) -> Long.compare((Long) b.get("value"), (Long) a.get("value")))
+      .limit(6)
+      .toList();
+  }
+
+  private List<Map<String, Object>> buildPriorityEfficiency(
+    List<Issue> currentScope,
+    ReportPeriod period
+  ) {
+    List<Issue> completed = currentScope
+      .stream()
+      .filter(issue -> completedInPeriod(issue, period))
+      .filter(issue -> issue.getCreatedAt() != null)
+      .toList();
+    List<Map<String, Object>> rows = new ArrayList<>();
+    for (String priority : List.of("P0", "P1", "P2", "P3")) {
+      List<Issue> group = completed
+        .stream()
+        .filter(issue -> priority.equals(value(issue.getPriority(), "P3")))
+        .toList();
+      rows.add(priorityEfficiencyRow(priority, group));
+    }
+    rows.add(priorityEfficiencyRow("整体", completed));
+    return rows;
+  }
+
+  private Map<String, Object> priorityEfficiencyRow(String label, List<Issue> issues) {
+    long[] counts = new long[] { 0, 0, 0, 0 };
+    for (Issue issue : issues) {
+      long hours = Duration.between(issue.getCreatedAt(), completedAt(issue)).toHours();
+      if (hours <= 24) counts[0]++;
+      else if (hours <= 72) counts[1]++;
+      else if (hours <= 168) counts[2]++;
+      else counts[3]++;
+    }
+    long total = Arrays.stream(counts).sum();
+    List<Integer> values = Arrays
+      .stream(counts)
+      .mapToInt(count -> total == 0 ? 0 : (int) Math.round((count * 100.0) / total))
+      .boxed()
+      .toList();
+    double averageDays = issues
+      .stream()
+      .mapToDouble(issue ->
+        Duration.between(issue.getCreatedAt(), completedAt(issue)).toHours() / 24.0
+      )
+      .average()
+      .orElse(0);
+    return map(
+      "label",
+      label,
+      "values",
+      values,
+      "average",
+      round1(averageDays),
+      "averageDays",
+      round1(averageDays),
+      "total",
+      total
+    );
+  }
+
+  private List<Map<String, Object>> buildAnalysisDatasets(
+    AnalysisMetrics current,
+    Object dimensionsValue
+  ) {
+    List<?> dimensions = dimensionsValue instanceof List<?> list ? list : List.of();
+    long departmentCount = dimensionItemCount(dimensions, "responsibleDepartment");
+    long typeCount = dimensionItemCount(dimensions, "issueType");
+    return List.of(
+      dataset("issueDetail", "问题明细", "按问题维度的完整明细数据", current.total(), "条", "primary"),
+      dataset("departmentRanking", "部门排行", "部门多维度排行与对比", departmentCount, "条", "green"),
+      dataset("typeDetail", "类型明细", "问题类型多维度分析", typeCount, "类", "primary"),
+      dataset("overdueList", "超期清单", "超期问题清单与明细", current.overdue(), "条", "danger"),
+      dataset("reopenedList", "复发清单", "复发问题清单与明细", current.reopened(), "条", "green")
+    );
+  }
+
+  private Map<String, Object> dataset(
+    String key,
+    String title,
+    String description,
+    long count,
+    String unit,
+    String tone
+  ) {
+    return map(
+      "key",
+      key,
+      "title",
+      title,
+      "desc",
+      description,
+      "description",
+      description,
+      "count",
+      count,
+      "unit",
+      unit,
+      "countLabel",
+      count + " " + unit,
+      "tone",
+      tone
+    );
+  }
+
+  private long dimensionItemCount(List<?> dimensions, String key) {
+    for (Object dimension : dimensions) {
+      if (!(dimension instanceof Map<?, ?> map)) continue;
+      if (!key.equals(String.valueOf(map.get("key")))) continue;
+      Object items = map.get("items");
+      return items instanceof List<?> list ? list.size() : 0;
+    }
+    return 0;
+  }
+
+  private List<Map<String, Object>> buildTrendEvents(List<Map<String, Object>> trend) {
+    if (trend.isEmpty()) return List.of();
+    List<Map<String, Object>> events = new ArrayList<>();
+    addTrendEvent(events, maxTrendDate(trend, "newIssues"), "新增问题峰值");
+    addTrendEvent(events, maxTrendDate(trend, "completed"), "集中完成处理");
+    addTrendEvent(events, maxTrendDate(trend, "overdue"), "超期风险抬升");
+    return events
+      .stream()
+      .collect(
+        Collectors.toMap(
+          item -> String.valueOf(item.get("date")) + item.get("label"),
+          Function.identity(),
+          (a, b) -> a,
+          LinkedHashMap::new
+        )
+      )
+      .values()
+      .stream()
+      .toList();
+  }
+
+  private void addTrendEvent(
+    List<Map<String, Object>> events,
+    String date,
+    String label
+  ) {
+    if (date != null) events.add(map("date", date, "label", label));
+  }
+
+  private String maxTrendDate(List<Map<String, Object>> trend, String key) {
+    return trend
+      .stream()
+      .max(Comparator.comparingLong(item -> longValue(item.get(key))))
+      .filter(item -> longValue(item.get(key)) > 0)
+      .map(item -> String.valueOf(item.get("date")))
+      .orElse(null);
   }
 
   private int issueRiskScore(Issue issue) {
@@ -996,14 +1459,140 @@ public class IssueService {
     return value != null && value.toLocalDate().equals(date);
   }
 
+  private ReportPeriod resolveReportPeriod(String startDate, String endDate) {
+    LocalDate defaultMonth = today().minusMonths(1);
+    LocalDate defaultStart = defaultMonth.withDayOfMonth(1);
+    LocalDate defaultEnd = defaultMonth.withDayOfMonth(defaultMonth.lengthOfMonth());
+    LocalDate end = parseDate(endDate).orElse(defaultEnd);
+    LocalDate start = parseDate(startDate).orElse(defaultStart);
+    if (start.isAfter(end)) {
+      throw new IllegalArgumentException("开始日期不能晚于结束日期");
+    }
+    long days = ChronoUnit.DAYS.between(start, end) + 1;
+    LocalDate previousEnd = start.minusDays(1);
+    LocalDate previousStart = previousEnd.minusDays(days - 1);
+    return new ReportPeriod(start, end, previousStart, previousEnd);
+  }
+
+  private Optional<LocalDate> parseDate(String value) {
+    if (value == null || value.isBlank()) return Optional.empty();
+    return Optional.of(LocalDate.parse(value.trim()));
+  }
+
+  private AnalysisMetrics analysisMetrics(
+    List<Issue> scope,
+    ReportPeriod period
+  ) {
+    long total = scope.size();
+    long newIssues = scope.stream().filter(issue -> createdInPeriod(issue, period)).count();
+    long completed = scope.stream().filter(issue -> completedInPeriod(issue, period)).count();
+    long pending = scope.stream().filter(issue -> openAtEnd(issue, period.end())).count();
+    long overdue = scope.stream().filter(issue -> isOverdueAtEnd(issue, period.end())).count();
+    long reopened = scope.stream().filter(i -> Boolean.TRUE.equals(i.getReopened())).count();
+    long highPriority = scope
+      .stream()
+      .filter(issue -> isHighPriority(issue) && !isCompletedByEnd(issue, period.end()))
+      .count();
+    double averageHours = averageHandleHoursInPeriod(scope, period);
+    double overdueRate = ratio(overdue, total);
+    double reopenedRate = ratio(reopened, total);
+    double slaRate = total == 0 ? 100 : Math.max(0, 100 - overdueRate);
+    int closureScore = total == 0 ? 100 : score(ratio(completed, total));
+    int overdueScore = score(100 - overdueRate);
+    int reopenedScore = score(100 - reopenedRate);
+    int responseScore = total == 0 ? 100 : score(100 - ratio(highPriority, total));
+    int governanceScore = Math.round(
+      (closureScore * 0.28f) +
+      (overdueScore * 0.32f) +
+      (reopenedScore * 0.24f) +
+      (responseScore * 0.16f)
+    );
+    return new AnalysisMetrics(
+      total,
+      newIssues,
+      completed,
+      pending,
+      overdue,
+      reopened,
+      highPriority,
+      slaRate,
+      overdueRate,
+      reopenedRate,
+      averageHours,
+      governanceScore,
+      closureScore,
+      overdueScore,
+      reopenedScore,
+      responseScore
+    );
+  }
+
   private boolean existedAndOpenOn(Issue issue, LocalDate date) {
     if (issue.getCreatedAt() == null || issue.getCreatedAt().toLocalDate().isAfter(date)) return false;
-    return issue.getActualFinishTime() == null || issue.getActualFinishTime().toLocalDate().isAfter(date);
+    LocalDateTime completedAt = completedAt(issue);
+    return completedAt == null || completedAt.toLocalDate().isAfter(date);
   }
 
   private boolean overdueOn(Issue issue, LocalDate date) {
     if (issue.getExpectedFinishTime() == null || !issue.getExpectedFinishTime().toLocalDate().isBefore(date)) return false;
-    return issue.getActualFinishTime() == null || issue.getActualFinishTime().toLocalDate().isAfter(date);
+    LocalDateTime completedAt = completedAt(issue);
+    return completedAt == null || completedAt.toLocalDate().isAfter(date);
+  }
+
+  private boolean activeDuring(Issue issue, LocalDate start, LocalDate end) {
+    LocalDate created = issue.getCreatedAt() == null
+      ? LocalDate.MIN
+      : issue.getCreatedAt().toLocalDate();
+    if (created.isAfter(end)) return false;
+    LocalDateTime completedAt = completedAt(issue);
+    return completedAt == null || !completedAt.toLocalDate().isBefore(start);
+  }
+
+  private boolean createdInPeriod(Issue issue, ReportPeriod period) {
+    LocalDate created = issue.getCreatedAt() == null
+      ? null
+      : issue.getCreatedAt().toLocalDate();
+    return created != null && !created.isBefore(period.start()) && !created.isAfter(period.end());
+  }
+
+  private boolean completedInPeriod(Issue issue, ReportPeriod period) {
+    LocalDateTime completedAt = completedAt(issue);
+    if (completedAt == null) return false;
+    LocalDate completed = completedAt.toLocalDate();
+    return !completed.isBefore(period.start()) && !completed.isAfter(period.end());
+  }
+
+  private boolean createdOn(Issue issue, LocalDate date) {
+    return sameDate(issue.getCreatedAt(), date);
+  }
+
+  private boolean completedOn(Issue issue, LocalDate date) {
+    LocalDateTime completedAt = completedAt(issue);
+    return completedAt != null && completedAt.toLocalDate().equals(date);
+  }
+
+  private boolean openAtEnd(Issue issue, LocalDate end) {
+    if (issue.getCreatedAt() != null && issue.getCreatedAt().toLocalDate().isAfter(end)) return false;
+    return !isCompletedByEnd(issue, end);
+  }
+
+  private boolean isCompletedByEnd(Issue issue, LocalDate end) {
+    LocalDateTime completedAt = completedAt(issue);
+    return completedAt != null && !completedAt.toLocalDate().isAfter(end);
+  }
+
+  private LocalDateTime completedAt(Issue issue) {
+    if (issue.getActualFinishTime() != null) return issue.getActualFinishTime();
+    if (isCompleted(issue) && issue.getUpdatedAt() != null) return issue.getUpdatedAt();
+    return null;
+  }
+
+  private boolean isOverdueAtEnd(Issue issue, LocalDate end) {
+    if (issue.getExpectedFinishTime() == null) return false;
+    return (
+      !issue.getExpectedFinishTime().toLocalDate().isAfter(end) &&
+      !isCompletedByEnd(issue, end)
+    );
   }
 
   private double averageHandleHours(List<Issue> issueList) {
@@ -1013,6 +1602,32 @@ public class IssueService {
       .mapToLong(i -> Duration.between(i.getCreatedAt(), i.getActualFinishTime()).toHours())
       .average()
       .orElse(0);
+  }
+
+  private double averageHandleHoursInPeriod(
+    List<Issue> issueList,
+    ReportPeriod period
+  ) {
+    return issueList
+      .stream()
+      .filter(issue -> issue.getCreatedAt() != null && completedInPeriod(issue, period))
+      .mapToLong(issue -> Duration.between(issue.getCreatedAt(), completedAt(issue)).toHours())
+      .average()
+      .orElse(0);
+  }
+
+  private double topShare(List<Issue> issues, Function<Issue, String> extractor) {
+    long total = issues.size();
+    if (total == 0) return 0;
+    long top = issues
+      .stream()
+      .collect(Collectors.groupingBy(issue -> value(extractor.apply(issue), "未分配"), Collectors.counting()))
+      .values()
+      .stream()
+      .mapToLong(Long::longValue)
+      .max()
+      .orElse(0);
+    return ratio(top, total);
   }
 
   private String topGroupName(
@@ -1048,12 +1663,69 @@ public class IssueService {
     return Math.round(value * 10) / 10.0;
   }
 
+  private double percentChange(double current, double previous) {
+    if (previous == 0) return current == 0 ? 0 : 100;
+    return ((current - previous) / previous) * 100.0;
+  }
+
+  private String signed(long value) {
+    return value > 0 ? "+" + value : String.valueOf(value);
+  }
+
+  private String signed(double value) {
+    double rounded = round1(value);
+    return rounded > 0 ? "+" + rounded : String.valueOf(rounded);
+  }
+
+  private long longValue(Object value) {
+    if (value instanceof Number number) return number.longValue();
+    if (value == null) return 0;
+    try {
+      return Long.parseLong(String.valueOf(value));
+    } catch (NumberFormatException ignored) {
+      return 0;
+    }
+  }
+
   private String deltaText(long value, String label) {
     return value + " 个" + label;
   }
 
   private String value(String value, String fallback) {
     return value == null || value.isBlank() ? fallback : value.trim();
+  }
+
+  private List<String> parseFilterValues(String value) {
+    if (value == null || value.isBlank()) return List.of();
+    return Arrays
+      .stream(value.split(","))
+      .map(String::trim)
+      .filter(item -> !item.isBlank())
+      .distinct()
+      .toList();
+  }
+
+  private List<String> availableDepartments(List<Issue> all) {
+    return all
+      .stream()
+      .map(issue -> value(issue.getResponsibleDepartment(), "未分配"))
+      .distinct()
+      .sorted()
+      .toList();
+  }
+
+  private List<Issue> filterByDepartments(
+    List<Issue> all,
+    List<String> departments
+  ) {
+    if (departments == null || departments.isEmpty()) return all;
+    Set<String> selected = new LinkedHashSet<>(departments);
+    return all
+      .stream()
+      .filter(issue ->
+        selected.contains(value(issue.getResponsibleDepartment(), "未分配"))
+      )
+      .toList();
   }
 
   private Map<String, Object> map(Object... values) {

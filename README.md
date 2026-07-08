@@ -12,11 +12,12 @@
 - 问题详情：文档式信息、原因/修复/验证、处理时间线、复发信息。
 - 状态流转：`待处理 → 处理中 → 待验证 → 已完成`；复发作为独立标记，每次变更自动写入处理记录。
 - 处理记录：详情页直接新增。
-- 数据模块：数据总览与可钻取数据分析，覆盖治理指数、趋势分解、结构剖面、效率剖面、维度树、问题明细和数据口径。
+- 数据模块：数据总览与可钻取数据分析，覆盖治理指数、趋势分解、结构剖面、效率剖面、维度树、问题明细和数据口径；支持周期筛选、部门筛选后端重算、对比上期开关、页签聚焦、CSV 导出和 URL 化钻取。
 - AI 能力：独立 AI 洞察页、SSE 流式追问、AI 生成待确认操作草稿、问题详情归因/建议/重复判断；未配置模型时使用本地规则兜底。
 - 登录与角色：内置内部账号登录，账号落库管理，密码 PBKDF2 哈希保存，支持禁用账号、字段配置、数据范围和 AI 草稿执行权限控制。
 - 操作日志：问题新增、编辑、删除、状态变更、复发标记、处理记录和 AI 确认执行动作均写入审计，并可在问题详情页查看。
-- CI：GitHub Actions 自动执行后端测试、前端构建和提交内容检查。
+- 前端性能：核心业务页面按路由懒加载，降低首屏同步加载的业务代码体积。
+- CI：GitHub Actions 自动执行文档契约、后端测试、前端构建和 Playwright E2E；当前 E2E 覆盖登录、新增问题、状态流转、数据模块筛选/钻取/CSV 导出、AI 草稿确认执行、账号禁用、角色新增和部门新增。
 - 统一响应：`{ code, message, data }`；统一异常处理。
 
 ## 目录
@@ -66,7 +67,7 @@ npm install
 npm run dev
 ```
 
-开发地址：`http://localhost:5173`。本地浏览器访问 `localhost` 或 `127.0.0.1` 时，前端默认直连 `http://127.0.0.1:8080/api`，可通过 `VITE_API_BASE_URL` 覆盖。
+开发地址：`http://localhost:18000`。本地浏览器访问 `localhost` 或 `127.0.0.1` 时，前端默认通过 Vite 代理访问 `http://127.0.0.1:8080/api`，可通过 `VITE_API_BASE_URL` 覆盖。若 Docker 前端容器也占用了 `18000`，请先停止容器或临时修改 Vite 端口。
 
 ### 默认登录账号
 
@@ -88,7 +89,7 @@ AUTH_TOKEN_TTL_SECONDS=28800
 AUTH_USERS=admin|admin123|ADMIN|照远;product|product123|PRODUCT|产品负责人
 ```
 
-`AUTH_USERS` 默认格式为 `账号|密码|角色|显示名`，也支持扩展为 `账号|密码|角色|显示名|部门|数据范围`。多个账号用英文分号分隔。当前角色支持 `ADMIN`、`PRODUCT`、`TECH`、`CS`、`VIEWER`。这些账号只用于创建缺失账号和补齐异常密码哈希，不会在数据库中明文保存密码；已存在账号的角色、部门、数据范围请以账号管理页为准。
+`AUTH_USERS` 默认格式为 `账号|密码|角色|显示名`，也支持扩展为 `账号|密码|角色|显示名|部门|数据范围`。多个账号用英文分号分隔。角色编码来自后台“账号管理 → 角色配置”，系统默认种子包含 `ADMIN`、`PRODUCT`、`TECH`、`CS`、`VIEWER`，管理员可在页面新增、编辑自定义角色并配置权限点、默认部门和默认数据范围。这些账号只用于创建缺失账号和补齐异常密码哈希，不会在数据库中明文保存密码；已存在账号的角色、部门、数据范围请以账号管理页为准。
 
 ### 数据范围权限
 
@@ -105,13 +106,21 @@ AUTH_USERS=admin|admin123|ADMIN|照远;product|product123|PRODUCT|产品负责�
 
 ### 企业 SSO 配置
 
-第一版已预留企业 SSO 入口和配置项。未配置时登录页会提示“企业 SSO 尚未启用”，仍使用账号密码登录。真实接入企业微信、OIDC 或 LDAP 时，需要补充对应回调和身份映射。
+第一版已提供企业 SSO 入口、受密钥保护的回调落库和自动创建账号能力。未配置时登录页会提示“企业 SSO 尚未启用”，仍使用账号密码登录。真实接入企业微信、OIDC 或 LDAP 时，可由网关或身份服务在认证成功后调用 `/api/auth/sso/callback`，系统会按 `ssoSubject` 绑定账号，必要时自动创建账号，并同步显示名和部门。
 
 ```text
 AUTH_SSO_ENABLED=false
 AUTH_SSO_PROVIDER_NAME=企业 SSO
 AUTH_SSO_LOGIN_URL=
+AUTH_SSO_CALLBACK_SECRET=
+AUTH_SSO_AUTO_PROVISION=true
+AUTH_SSO_DEFAULT_ROLE=VIEWER
+AUTH_SSO_DEFAULT_DATA_SCOPE=DEPARTMENT
+
+ORG_DEPARTMENTS=全部,产品部,技术部,客服部,管理部
 ```
+
+`AUTH_SSO_CALLBACK_SECRET` 只放在后端环境变量里，调用回调接口时通过 `X-SSO-Token` 请求头传入；生产环境启用 SSO 时必须配置 32 位以上随机值。`ORG_DEPARTMENTS` 用于启动时同步部门基础数据，同时系统也会从已有账号和角色默认部门补齐部门表。
 
 ## Docker Compose 启动
 
@@ -164,12 +173,72 @@ DOCKER_DNS_PRIMARY=223.5.5.5
 DOCKER_DNS_SECONDARY=114.114.114.114
 ```
 
+## 生产部署前检查
+
+HTTPS / 反向代理不在本项目内处理，生产环境至少需要完成以下应用侧检查：
+
+```bash
+bash scripts/generate-prod-env.sh .env.production.local
+bash scripts/check-env.sh .env.production.local
+docker compose --env-file .env.production.local up -d --build
+bash scripts/docker-smoke.sh .env.production.local
+```
+
+`scripts/generate-prod-env.sh` 会生成数据库密码、`AUTH_SECRET`、SSO 回调密钥和初始管理员密码，并从现有 `.env` 继承 `AI_API_KEY` / `DEEPSEEK_API_KEY`。生成的 `.env.production.local` 已被 `.gitignore` 忽略，不要提交到 Git。
+
+如果需要手工维护生产配置，可以从 `.env.production.example` 复制后替换所有 `CHANGE_ME` 值；自动生成脚本更适合首次部署。
+
+如果你手动维护生产 `.env`，或者生产环境已经替换管理员账号，请在冒烟前设置登录账号：
+
+```bash
+SMOKE_USERNAME=admin SMOKE_PASSWORD=your-password bash scripts/docker-smoke.sh
+```
+
+如果是本地开发环境，需要允许示例账号和默认数据库密码：
+
+```bash
+ALLOW_DEV_DEFAULTS=true bash scripts/check-env.sh .env.example
+```
+
+### 部署脚本
+
+| 脚本 | 用途 |
+|---|---|
+| `scripts/generate-prod-env.sh` | 生成本地忽略的生产环境变量文件，自动填充强随机密钥和初始管理员密码 |
+| `scripts/check-env.sh` | 上线前校验 `.env`，拦截默认密码、占位密钥、弱 `AUTH_SECRET` 和端口配置错误 |
+| `scripts/docker-smoke.sh` | Docker Compose 启动后执行真实冒烟测试，覆盖登录、健康检查、首页统计、趋势、数据分析和 AI 洞察接口 |
+| `scripts/mysql-backup.sh` | 导出 MySQL 备份到 `backups/*.sql.gz` |
+| `scripts/mysql-restore.sh` | 从 `.sql` 或 `.sql.gz` 恢复 MySQL，必须显式设置 `CONFIRM_RESTORE=YES` |
+
+备份示例：
+
+```bash
+bash scripts/mysql-backup.sh
+```
+
+恢复示例：
+
+```bash
+CONFIRM_RESTORE=YES bash scripts/mysql-restore.sh backups/issue_ops-YYYYMMDD-HHMMSS.sql.gz
+```
+
+### 运维接口
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/health` | 服务存活检查，不需要登录 |
+| GET | `/api/readiness` | 就绪检查，不需要登录；返回数据库、AI 配置和认证密钥状态，不暴露密钥内容 |
+
+`/api/readiness` 中数据库不可用时返回 HTTP 503；AI Key 未配置或认证密钥仍是开发默认值时返回 `DEGRADED`，系统仍可通过本地规则兜底运行。
+
 ## GitHub Actions CI
 
 仓库已包含 `.github/workflows/ci.yml`，在 push 或 PR 到 `main` 时自动执行：
 
+- 文档契约：`bash scripts/verify-docs.sh`
 - 后端：`mvn test`
 - 前端：`npm ci` 与 `npm run build`
+- 前端 E2E：`npm run test:e2e`，通过 Playwright 拦截 API，覆盖登录、新增问题、状态流转、数据分析筛选/钻取/CSV 导出、AI 草稿确认执行、账号禁用、角色新增和部门新增
 - 提交内容检查：阻止 `.env`、`node_modules`、`dist`、`target`、`output`、日志和 tsbuildinfo 进入版本库
 
 ## AI 洞察说明
@@ -232,7 +301,7 @@ AI 接口会先在当前登录账号可见的数据范围内执行本地规则�
 | GET | `/api/dashboard/ai-insight` | 兼容旧版首页 AI 洞察接口，新页面使用 `/api/ai-insights/*` |
 | POST | `/api/dashboard/ai-insight/query` | 兼容旧版首页 AI 提问接口 |
 | GET | `/api/reports/overview` | 数据报表 |
-| GET | `/api/reports/analysis` | 数据分析主界面，返回治理指数、维度树、趋势、效率分布、明细和数据口径 |
+| GET | `/api/reports/analysis?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&departments=技术部,产品部` | 数据分析主界面，日期和部门参数可选；默认上一个完整自然月，按当前用户可见数据和部门筛选重新聚合，返回治理指数、维度树、趋势、效率分布、明细和数据口径 |
 | GET | `/api/retrospectives/overview` | 复盘沉淀总览 |
 | GET | `/api/retrospectives/ai-suggestion` | 复盘沉淀 AI 建议 |
 | POST | `/api/retrospectives/draft` | 基于问题生成复盘草稿 |
@@ -250,8 +319,21 @@ AI 接口会先在当前登录账号可见的数据范围内执行本地规则�
 | POST | `/api/accounts` | 新增账号，管理员；支持部门和数据范围 |
 | PUT | `/api/accounts/{id}` | 编辑账号/重置密码/部门/数据范围，管理员 |
 | PATCH | `/api/accounts/{id}/enabled` | 启用/停用账号，管理员 |
+| GET | `/api/roles` | 角色列表，管理员；支持 `enabledOnly=true` |
+| GET | `/api/roles/permissions` | 可配置权限点及中文标签，管理员 |
+| POST | `/api/roles` | 新增后台角色，管理员 |
+| PUT | `/api/roles/{id}` | 编辑角色名称、权限、默认部门和默认数据范围，管理员 |
+| PATCH | `/api/roles/{id}/enabled` | 启用/停用自定义角色，管理员 |
+| DELETE | `/api/roles/{id}` | 删除未被账号使用的自定义角色，管理员 |
+| GET | `/api/departments?enabledOnly=true` | 部门列表，登录用户可读；账号和角色默认部门下拉使用 |
+| POST | `/api/departments` | 新增后台部门，管理员 |
+| PUT | `/api/departments/{id}` | 编辑部门名称、上级部门、排序和启用状态，管理员 |
+| PATCH | `/api/departments/{id}/enabled` | 启用/停用未被引用的部门，管理员 |
+| DELETE | `/api/departments/{id}` | 删除未被账号或角色引用的部门，管理员 |
+| POST | `/api/departments/sync` | 同步部门列表，管理员；用于对接企业通讯录或 HR 系统 |
 | GET | `/api/auth/sso/config` | 获取企业 SSO 启用状态 |
 | POST | `/api/auth/sso/login` | 获取企业 SSO 登录跳转地址 |
+| POST | `/api/auth/sso/callback` | 企业 SSO 回调落库，需 `X-SSO-Token` 共享密钥 |
 
 字段配置支持的 `type`：
 
@@ -266,8 +348,8 @@ IMPACT_SCOPE    影响范围
 
 ## 后续建议
 
-1. 完成真实企业 SSO 回调、组织部门同步和字段级可见/编辑权限。
-2. 附件升级为对象存储上传，TAPD 增加双向同步与 Webhook。
-3. 增加通知订阅、SLA 分级规则、自动升级和定期复盘任务。
-4. 为核心前端流程补充 Playwright E2E，覆盖新增问题、状态流转、AI 草稿确认。
-5. AI 模块接入知识库检索、字段脱敏和更细的操作权限控制。
+1. 接入真实企业身份源：企业微信、OIDC、LDAP 或 AD，并把 SSO callback 的共享密钥模式替换为标准授权码/OIDC token 校验。
+2. 增强部门治理：增加企业通讯录同步记录、部门批量迁移账号、部门层级树形展示。
+3. 补字段级可见/编辑权限，解决不同角色在详情页能看什么、能改什么的问题。
+4. 数据分析继续补保存视图、分享链接标题和导出任务记录，提升运营复盘可追溯性。
+5. 将 CI 的文档契约扩展到 OpenAPI 或 Spring REST Docs，减少接口文档人工维护成本。

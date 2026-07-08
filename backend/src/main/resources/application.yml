@@ -27,7 +27,7 @@ deepseek:
 ai:
   provider: ${AI_PROVIDER:deepseek}
   api-key: ${AI_API_KEY:${DEEPSEEK_API_KEY:}}
-  base-url: ${AI_BASE_URL:${DEEPSEEK_BASE_URL:}}
+  base-url: ${AI_BASE_URL:${DEEPSEEK_BASE_URL:https://api.deepseek.com}}
   model: ${AI_MODEL:${DEEPSEEK_MODEL:deepseek-v4-pro}}
   timeout-ms: ${AI_TIMEOUT_MS:60000}
   temperature: ${AI_TEMPERATURE:0.2}
@@ -35,8 +35,15 @@ ai:
 auth:
   secret: ${AUTH_SECRET:dev-local-issue-ops-secret-change-me}
   token-ttl-seconds: ${AUTH_TOKEN_TTL_SECONDS:28800}
-  users: ${AUTH_USERS:admin|admin123|ADMIN|照远;product|product123|PRODUCT|产品负责人;tech|tech123|TECH|技术负责人;cs|cs123|CS|客服同学;viewer|viewer123|VIEWER|观察员}
+  users: ${AUTH_USERS:admin|admin123|ADMIN|照远|全部|ALL;product|product123|PRODUCT|产品负责人|产品部|DEPARTMENT;tech|tech123|TECH|技术负责人|技术部|DEPARTMENT;cs|cs123|CS|客服同学|客服部|OWN;viewer|viewer123|VIEWER|观察员|全部|ALL}
   sso:
     enabled: ${AUTH_SSO_ENABLED:false}
     provider-name: ${AUTH_SSO_PROVIDER_NAME:企业 SSO}
     login-url: ${AUTH_SSO_LOGIN_URL:}
+
+    callback-secret: ${AUTH_SSO_CALLBACK_SECRET:}
+    auto-provision: ${AUTH_SSO_AUTO_PROVISION:true}
+    default-role: ${AUTH_SSO_DEFAULT_ROLE:VIEWER}
+    default-data-scope: ${AUTH_SSO_DEFAULT_DATA_SCOPE:DEPARTMENT}
+org:
+  departments: ${ORG_DEPARTMENTS:全部,产品部,技术部,客服部,管理部}
