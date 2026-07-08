@@ -185,6 +185,7 @@ bash scripts/docker-smoke.sh .env.production.local
 ```
 
 `scripts/generate-prod-env.sh` 会生成数据库密码、`AUTH_SECRET`、SSO 回调密钥和初始管理员密码，并从现有 `.env` 继承 `AI_API_KEY` / `DEEPSEEK_API_KEY`。生成的 `.env.production.local` 已被 `.gitignore` 忽略，不要提交到 Git。
+生成文件中包含 `COMPOSE_PROJECT_NAME=issueops`，用于固定 Docker Compose 项目名和数据卷名，避免换目录部署时创建另一套 MySQL 卷。
 
 如果需要手工维护生产配置，可以从 `.env.production.example` 复制后替换所有 `CHANGE_ME` 值；自动生成脚本更适合首次部署。
 

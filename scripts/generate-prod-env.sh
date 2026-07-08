@@ -60,6 +60,8 @@ cat > "$output" <<EOF
 # Generated production-like deployment file.
 # Keep this file out of Git. It contains real secrets.
 
+COMPOSE_PROJECT_NAME=$(get_env COMPOSE_PROJECT_NAME issueops)
+
 BACKEND_PORT=$(get_env BACKEND_PORT 8080)
 FRONTEND_PORT=$(get_env FRONTEND_PORT 18000)
 MYSQL_PORT=$(get_env MYSQL_PORT 3306)
